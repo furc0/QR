@@ -133,3 +133,14 @@ def test_part_creation_assigns_category_atomically():
         "part_code": "ATOMIC-CAT-02", "title": "Wrong category", "category_id": "not-in-this-org"
     })
     assert invalid.status_code == 404
+
+
+def test_detail_deep_link_and_bundled_viewer_assets():
+    part_id = create_part("DETAIL-PAGE-01", "Direct link test")
+    page = client.get("/parts/" + part_id)
+    assert page.status_code == 200
+    assert 'id="model-view"' in page.text
+    assert "/vendor/three/three.min.js" in page.text
+    assert "cdn.jsdelivr.net" not in page.text
+    assert client.get("/vendor/three/three.min.js").status_code == 200
+    assert client.get("/vendor/three/STLLoader.js").status_code == 200
