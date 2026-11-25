@@ -132,6 +132,12 @@ public class MainActivity extends AppCompatActivity {
         }catch(Exception e){return false;}
     }
     private void openCode(String raw){
+        if(raw.startsWith("QRPAIR|")){
+            String[] parts=raw.split("\\|",-1);
+            if(parts.length!=3){toast("Неверный код подключения");return;}
+            try{String id=UUID.fromString(parts[1]).toString();manual(parts[2],id);}catch(Exception e){toast("Неверный код подключения");}
+            return;
+        }
         String path=Locator.path(raw);
         if(path==null){toast("Нужен номер карточки, QR или Data Matrix из каталога QR.");return;}
         if(path.startsWith("/n/"))number.setText(path.substring(3));
@@ -161,6 +167,14 @@ public class MainActivity extends AppCompatActivity {
                 WifiManager wifi=(WifiManager)getApplicationContext().getSystemService(WIFI_SERVICE);
                 if(wifi!=null){lock=wifi.createMulticastLock("qr-discovery");lock.setReferenceCounted(false);lock.acquire();}
                 found=Discovery.find();
+                boolean matched=false;
+                for(Discovery.Server s:found)if(s.id.equals(expected))matched=true;
+                if(found.isEmpty()||(!expected.isEmpty()&&!matched)){
+                    for(Discovery.Server s:MdnsDiscovery.find(this)){
+                        boolean exists=false;for(Discovery.Server x:found)if(x.id.equals(s.id))exists=true;
+                        if(!exists)found.add(s);
+                    }
+                }
             }catch(Exception e){found=new ArrayList<>();}
             finally{if(lock!=null&&lock.isHeld())lock.release();}
             if(verified!=null){boolean exists=false;for(Discovery.Server x:found)if(x.id.equals(verified.id))exists=true;if(!exists)found.add(verified);}
@@ -208,10 +222,11 @@ public class MainActivity extends AppCompatActivity {
               epoch++;busy=false;online=false;origin="";pinned="";pending="/";prefs.edit().clear().apply();makeWeb();showStatus("Сервер сброшен",false);
           }).setNegativeButton("Отмена",null).show();
     }
-    private void manual(String raw){
+    private void manual(String raw){manual(raw,"");}
+    private void manual(String raw,String requiredId){
         epoch++;final int ticket=epoch;busy=true;showStatus("Проверка адреса…",false);
         worker.execute(()->{
-            try{Discovery.Server s=Discovery.verify(raw);runOnUiThread(()->{if(ticket!=epoch||destroyed)return;busy=false;if(pinned.equals(s.id))accept(s);else confirm(s);});}
+            try{Discovery.Server s=Discovery.verify(raw);if(!requiredId.isEmpty()&&!requiredId.equals(s.id))throw new IOException("ID базы отличается от QR подключения");runOnUiThread(()->{if(ticket!=epoch||destroyed)return;busy=false;if(pinned.equals(s.id))accept(s);else confirm(s);});}
             catch(Exception e){runOnUiThread(()->{if(ticket!=epoch||destroyed)return;busy=false;showStatus("Ошибка подключения: "+e.getMessage(),false);});}
         });
     }

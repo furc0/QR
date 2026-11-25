@@ -42,3 +42,7 @@ def test_mobile_number_and_permissions():
 def test_presence_requires_login():
     assert client.get("/api/mobile/presence").status_code == 401
     assert client.post("/api/mobile/heartbeat",json={"device":str(uuid.uuid4())}).status_code == 401
+
+
+def test_pairing_requires_login():
+    assert client.get("/api/mobile/pairing").status_code == 401

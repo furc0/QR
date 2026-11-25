@@ -1,10 +1,11 @@
 """Mobile catalogue locators. Numbers are permanent within a catalogue."""
 import io
+import os
 import uuid
 import threading
 import time
 from pydantic import BaseModel, Field
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from .main import app, connect, current_user, org_for, WEB
 
@@ -122,3 +123,27 @@ def presence(u=Depends(current_user)):
     with _presence_lock:
         prune_presence(time.monotonic())
         return {"connected_devices": sum(1 for key in _presence if key[0] == org_for(u))}
+
+
+def pairing_addresses(request):
+    if not request.client or request.client.host != "127.0.0.1":
+        raise HTTPException(403, "Откройте настройки на ПК через 127.0.0.1")
+    from .launcher import lan_addresses
+    port = int(os.getenv("QR_LAN_PORT") or request.url.port or 8765)
+    return [{"ip": ip, "origin": f"http://{ip}:{port}"} for ip in lan_addresses()]
+
+
+@app.get("/api/mobile/pairing")
+def pairing(request: Request, u=Depends(current_user)):
+    return {"catalogue_id": catalogue_id(), "addresses": pairing_addresses(request)}
+
+
+@app.get("/api/mobile/pairing/{ip}/qr")
+def pairing_qr(ip: str, request: Request, u=Depends(current_user)):
+    address = next((x for x in pairing_addresses(request) if x["ip"] == ip), None)
+    if not address:
+        raise HTTPException(404, "IP-адрес уже недоступен. Обновите настройки.")
+    import zxingcpp
+    value = f'QRPAIR|{catalogue_id()}|{address["origin"]}'
+    barcode = zxingcpp.create_barcode(value, zxingcpp.BarcodeFormat.QRCode)
+    return Response(barcode.to_svg(add_quiet_zones=True), media_type="image/svg+xml")

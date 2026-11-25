@@ -73,3 +73,44 @@ def serve_discovery(stop: threading.Event, catalogue_id: str, port: int):
                     pass
     except OSError as exc:
         print("QR UDP discovery unavailable:", exc, flush=True)
+
+
+def serve_mdns(stop, catalogue_id, port):
+    """Re-register after changing adapters; UDP remains the fallback."""
+    from .launcher import lan_addresses
+    from zeroconf import IPVersion, ServiceInfo, Zeroconf
+    service_type = "_qrcatalogue._tcp.local."
+    name = f"QR-{catalogue_id[:8]}.{service_type}"
+    previous = ()
+    zc = info = None
+    def close():
+        if zc:
+            try:
+                if info:
+                    zc.unregister_service(info)
+            except Exception:
+                pass
+            finally:
+                zc.close()
+    try:
+        while not stop.is_set():
+            addresses = tuple(sorted(lan_addresses()))
+            if addresses != previous:
+                close()
+                zc = info = None
+                previous = ()
+                if addresses:
+                    try:
+                        zc = Zeroconf(ip_version=IPVersion.V4Only)
+                        info = ServiceInfo(service_type, name, addresses=[socket.inet_aton(a) for a in addresses],
+                            port=port, properties={"catalogue_id":catalogue_id,"protocol":"1"},
+                            server=f"qr-{catalogue_id[:8]}.local.")
+                        zc.register_service(info)
+                        previous = addresses
+                    except Exception as exc:
+                        print("QR mDNS unavailable:", exc, flush=True)
+                        close()
+                        zc = info = None
+            stop.wait(12)
+    finally:
+        close()

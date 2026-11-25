@@ -140,7 +140,7 @@ window.addEventListener("pagehide",()=>document.body.classList.remove("signed-in
 window.addEventListener("pageshow",event=>{if(event.persisted)location.reload();});
 $("#connect").onclick=()=>{const v=$("#remote").value.trim().replace(/\/+$/,"");if(!/^https?:\/\//i.test(v))return note("Введите полный URL сервера");document.body.classList.remove("signed-in");S.api=v;saveSetting("localStorage","qr_api",v);S.token="";saveSetting("sessionStorage","qr_token","");start()};
 $("#local").onclick=()=>{saveSetting("localStorage","qr_api","");saveSetting("sessionStorage","qr_token","");location.href="/"};
-document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(!document.body.classList.contains("signed-in"))return;page(b.dataset.page);if(b.dataset.page==="catalog")load().catch(x=>note(x.message));if(b.dataset.page==="members")refreshMembers().catch(x=>note(x.message));if(b.dataset.page==="categories")loadCategories().then(renderCategories).catch(x=>note(x.message))});
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(!document.body.classList.contains("signed-in"))return;page(b.dataset.page);if(b.dataset.page==="catalog")load().catch(x=>note(x.message));if(b.dataset.page==="settings")loadPairing();if(b.dataset.page==="members")refreshMembers().catch(x=>note(x.message));if(b.dataset.page==="categories")loadCategories().then(renderCategories).catch(x=>note(x.message))});
 $("#category-create").onclick=async()=>{const name=$("#category-name").value.trim();if(!name)return note("Введите название категории");try{await req("/api/categories",{method:"POST",body:JSON.stringify({name})});$("#category-name").value="";await loadCategories();renderCategories();note("Категория создана")}catch(e){note(e.message)}};
 function renderCategories(){$("#category-rows").innerHTML=S.categories.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+c.part_count+'</td><td><button data-rename="'+c.id+'">Переименовать</button> <button data-delete="'+c.id+'">Удалить</button></td></tr>').join("")||'<tr><td colspan="3">Категорий пока нет</td></tr>'}
 $("#category-rows").onclick=async e=>{try{if(e.target.dataset.delete){if(!confirm("Удалить категорию? Детали сохранятся без категории."))return;await req("/api/categories/"+e.target.dataset.delete,{method:"DELETE"})}if(e.target.dataset.rename){const c=S.categories.find(x=>x.id===e.target.dataset.rename),name=prompt("Новое название категории",c.name);if(name===null)return;await req("/api/categories/"+c.id,{method:"PATCH",body:JSON.stringify({name})})}await loadCategories();renderCategories();await load()}catch(x){note(x.message)}};
@@ -328,6 +328,24 @@ for(const [selector,path] of [["#create-user","/api/project/users"],["#add-membe
   finally { button.disabled=false; }
  };
 }
+async function loadPairing(){
+ const block=$("#pair-addresses");block.replaceChildren();
+ if(navigator.userAgent.includes("QRMobile/")){$("#mobile-pairing").hidden=true;return}
+ try{
+  const data=await req("/api/mobile/pairing");
+  const title=document.createElement("p");title.textContent="ID базы: "+data.catalogue_id;block.append(title);
+  if(!data.addresses.length){const p=document.createElement("p");p.textContent="ПК не подключён к локальной сети.";block.append(p)}
+  for(const a of data.addresses){
+   const row=document.createElement("div");row.className="pair-address";
+   const label=document.createElement("code");label.textContent=a.origin;row.append(label);
+   const response=await fetch(url("/api/mobile/pairing/"+encodeURIComponent(a.ip)+"/qr"),{headers:{Authorization:"Bearer "+S.token}});
+   if(!response.ok)throw Error("Не удалось создать код подключения");
+   const image=document.createElement("img");image.alt="QR подключения "+a.origin;
+   const src=URL.createObjectURL(await response.blob());image.onload=image.onerror=()=>URL.revokeObjectURL(src);image.src=src;row.append(image);block.append(row);
+  }
+ }catch(error){block.textContent=error.message}
+}
+$("#pair-refresh").onclick=loadPairing;
 let presenceBusy=false;
 async function updatePresence(){
  if(presenceBusy||!S.token||!document.body.classList.contains("signed-in"))return;
