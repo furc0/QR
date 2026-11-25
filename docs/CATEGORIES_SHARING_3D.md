@@ -28,15 +28,15 @@ API:
 - `POST /api/parts/{id}/models` multipart field `file`
 - `GET /api/models/{model_id}/download`
 
-STL and OBJ are previewed in the detail page with locally bundled Three.js and loaders; no CDN access is required. The viewer supports orbit rotation, pan, zoom and fit-to-view. STEP/STP are retained as original CAD files and can be downloaded. The browser uses the OpenCascade WebAssembly importer to tessellate STEP locally into Three.js meshes; per-face CAD colors are retained when provided by the importer, output linear units are requested as millimetres, and the source file remains unchanged.
+STL and OBJ are previewed in the detail page with locally bundled Three.js and loaders; no CDN access is required. The viewer supports orbit rotation, pan, zoom and fit-to-view. STEP/STP are retained as original CAD files and can be downloaded. The browser uses the OpenCascade WebAssembly importer to tessellate STEP locally into Three.js meshes; per-face CAD colors are retained when provided by the importer, output linear units are requested as millimetres, and the source file remains unchanged. Model geometry is processed in the browser and is not sent to a third-party conversion service.
 
 ## Current limitations and next engineering tasks
 
-1. Bundle Three.js locally instead of relying on CDN, for offline workstations.
-2. Add OpenCascade conversion for STEP/STP to GLB/glTF, with explicit unit handling and conversion status.
-3. Add viewer controls for pan, fit-to-view, axes, wireframe, section planes and model versions.
-4. Add per-organization roles and granular permissions for category/model administration.
-5. Add upload streaming, antivirus/content validation and storage quotas before production use.
+1. Add an orientation cube, axis visibility, wireframe mode and section planes.
+2. Expose the STEP assembly hierarchy from the OpenCascade import result, with per-body visibility toggles.
+3. Add model revisions, an active-model selector and comparison between model versions.
+4. Add explicit unit confirmation for STL/OBJ files and show model bounding dimensions.
+5. Add antivirus/content validation, configurable storage quotas and backup/restore before production use.
 
 
 ## Engineering accuracy and file handling
@@ -45,7 +45,7 @@ STL and OBJ are previewed in the detail page with locally bundled Three.js and l
 - STL does not define physical units. OBJ files may also lack reliable unit metadata. Do not infer millimetres from the viewer scale; verify units and dimensions against the source CAD system and drawing.
 - Uploads are streamed to a temporary file, capped at 250 MiB, hashed with SHA-256, and atomically moved into the model vault before the database record is committed. Failed writes remove the temporary/orphaned file.
 - Model downloads are organization-authenticated and preserve the original filename. No public unauthenticated file URL is generated.
-- STEP/STP upload is supported, but browser tessellation is not yet available. The source file remains downloadable; no approximate/fake mesh is displayed in its place.
+- STEP/STP files are tessellated locally in the browser with the pinned OpenCascade WebAssembly importer after its runtime is installed. The original source file remains unchanged and downloadable.
 
 
 ### STEP/STP runtime

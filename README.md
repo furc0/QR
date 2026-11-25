@@ -34,6 +34,7 @@ Keep the terminal window open. Runtime database and uploaded files are stored in
 ## Important limitations
 
 - SQLite is currently not encrypted. Do not store confidential production drawings in this prototype.
-- STL/OBJ preview uses bundled Three.js and works offline. STEP/STP preview works after the pinned OpenCascade WASM runtime is installed; the original CAD file remains unchanged.
-- STEP/STP preview uses OpenCascade WebAssembly in the browser. The first Windows launch attempts to download the pinned 7.6 MB runtime and verifies its Git blob SHA-1.
+- STL/OBJ preview works offline with the bundled Three.js runtime. STEP/STP preview uses the pinned OpenCascade WebAssembly runtime after it has been installed; the first Windows launch attempts a verified 7.6 MB download. If it cannot download, QR still starts and `py install_step_runtime.py` can be run later.
+- Large STEP assemblies may take significant time and browser memory to tessellate. The source CAD file is preserved unchanged.
+- STL/OBJ files may not contain reliable unit metadata. Confirm units and dimensions in the source CAD system; the viewer is not a certified measuring tool.
 - PostgreSQL adapter, SQLCipher/DPAPI, encrypted file vault, sync, licensing, QR image generation, backups/restore and production deployment hardening remain future work.
