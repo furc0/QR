@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import hashlib, uuid, sqlite3, unicodedata
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -106,7 +107,8 @@ def part_share(part_id: str, u=Depends(current_user)):
     with connect() as c:
         if not c.execute("SELECT 1 FROM parts WHERE id=? AND organization_id=?",(part_id,oid)).fetchone():
             raise HTTPException(404, "Деталь не найдена")
-    return {"url":f"/parts/{part_id}","part_id":part_id,"access":"organization-authenticated"}
+    return {"url":f"/parts/{part_id}","part_id":part_id,"access":"organization-authenticated",
+            "origin":os.environ.get("QR_SHARE_ORIGIN"),"lan_origins":os.environ.get("QR_LAN_ORIGINS","").split(",") if os.environ.get("QR_LAN_ORIGINS") else []}
 
 @router.get("/parts/{part_id}")
 def part_page(part_id: str):

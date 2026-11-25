@@ -40,9 +40,11 @@ Do not copy the `.venv/` directory from one computer to another. Python virtual 
 
 The launcher does not remove or recreate `data/`; the SQLite database and uploaded files remain untouched.
 
-## Local-only detail links
+## Shared links on the local network
 
-Part and assembly links are generated with the loopback address `http://127.0.0.1:<port>/parts/{part_id}`. They open only on the computer running QR, while its local server is running. They are not public links and cannot be opened from another computer or phone. No tunnel (ngrok or similar) is configured by the application.
+Run QR on one computer. Colleagues on the same trusted LAN open its card links in their browsers and sign in to the project. A card link uses the server computer name, a persistent port, project ID and part ID. Replacing or adding files preserves the link. Keep the server name and data folder when updating. The first available port is saved in the data folder; later launches report a conflict if that port is busy. QR_PORT overrides the saved port.
+
+For networks with managed DNS, set QR_SHARE_ORIGIN to a stable HTTP(S) origin. The card also lists IP-based addresses for networks where computer names do not resolve. Reserve the server IP in DHCP before distributing IP-based links. The Windows launcher listens on loopback and the detected private IPv4 addresses. Complete initial administrator setup on the server itself. Allow incoming connections to the printed QR port on the trusted LAN according to your network policy. Restart QR after changing network adapters. Keep the server awake while sharing. Use HTTPS on a managed reverse proxy if the network requires encrypted transport.
 
 ## Server placement
 
