@@ -40,3 +40,5 @@
 body:not(.signed-in) nav,
 body:not(.signed-in) :is(#catalog,#detail,#categories,#members,#modal,#project-picker,#logout),
 body:not(.signed-in):not(.choosing-server) #settings {display:none!important}
+
+#mark-preview{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap}#mark-preview img{width:112px;height:112px;object-fit:contain;background:white;padding:6px} @media(max-width:750px){aside{position:static;width:100%;padding:8px 12px}aside nav{display:flex;gap:5px;flex-wrap:wrap}aside nav button:not(.active){display:inline-block}aside nav button{font-size:12px}main{margin-left:0;padding:12px}.panel{overflow:auto}.auth{margin:10px auto;padding:16px}#model-view{height:300px}#detail .detail-meta{gap:16px}.share-row input{min-width:0}body:not(.signed-in) aside{display:none}}

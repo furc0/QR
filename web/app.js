@@ -12,11 +12,37 @@ function saveSetting(storage, key, value) {
  } catch { /* The active connection and token are also held in S. */ }
 }
 const $=s=>document.querySelector(s),S={api:readSetting("localStorage","qr_api"),token:readSetting("sessionStorage","qr_token"),items:[],categories:[],viewer:null,assemblyItems:[],selectedComponentId:null};
-if(location.pathname.startsWith("/s/") && S.api && S.api!==location.origin){
+if((location.pathname.startsWith("/s/")||location.pathname.startsWith("/n/")||navigator.userAgent.includes("QRMobile/")) && S.api && S.api!==location.origin){
  S.api=""; S.token="";
  saveSetting("localStorage","qr_api",""); saveSetting("sessionStorage","qr_token","");
 }
 const url=p=>(S.api?S.api.replace(/\/+$/,""):"")+p;
+async function displayNumber(id){
+ const data=await req("/api/mobile/parts/"+id+"/number");
+ $("#card-number").value=data.number;
+ const block=$("#mark-preview");block.replaceChildren();
+ for(const kind of ["qr","datamatrix"]){
+  const img=document.createElement("img");img.alt=kind==="qr"?"QR":"Data Matrix";
+  const response=await fetch(url("/api/mobile/parts/"+id+"/label/"+kind+"/svg"),{headers:{Authorization:"Bearer "+S.token}});
+  if(!response.ok)throw Error("Ошибка формирования маркировки");
+  const objectUrl=URL.createObjectURL(await response.blob());img.onload=img.onerror=()=>URL.revokeObjectURL(objectUrl);img.src=objectUrl;block.append(img);
+ }
+}
+async function exportLabel(kind,ext){
+ const path="/api/mobile/parts/"+S.detailId+"/label/"+kind+"/"+ext;
+ return downloadBinary(path,$("#card-number").value+"-"+kind+"."+ext);
+}
+async function downloadBinary(path,filename){
+ if(window.QRNative && typeof window.QRNative.postMessage==="function"){
+  window.QRNative.postMessage(JSON.stringify({path,filename,token:S.token}));return;
+ }
+ const response=await fetch(url(path),{headers:{Authorization:"Bearer "+S.token}});
+ if(!response.ok)throw Error("Не удалось скачать файл");
+ const blob=await response.blob(),a=document.createElement("a"),u=URL.createObjectURL(blob);
+ a.href=u;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);
+}
+$("#number-copy").onclick=async()=>{const field=$("#card-number");try{await navigator.clipboard.writeText(field.value);note("Номер скопирован");return}catch{}field.select();note(document.execCommand("copy")?"Номер скопирован":"Скопируйте номер вручную");};
+$("#mark-download").onclick=()=>exportLabel($("#mark-kind").value,$("#mark-format").value).catch(e=>note(e.message));
 function displayShare(share){
  const field=$("#share-link");
  field.value=share.permalink||"";
@@ -62,7 +88,8 @@ async function start(){
 }
 async function home(){let m=await req("/api/me");
  const code=location.pathname.match(/^\/s\/([A-Za-z0-9_-]+)\/?$/)?.[1];
- const target=code?await req("/api/shared/"+encodeURIComponent(code)):null;
+ const number=location.pathname.match(/^\/n\/([0-9]{1,18})\/?$/)?.[1];
+ const target=number?await req("/api/mobile/resolve/"+number):code?await req("/api/shared/"+encodeURIComponent(code)):null;
  S.detailId=target?.part_id||location.pathname.match(/^\/parts\/([^/]+)/)?.[1];
  const linked=target?.project_id||new URLSearchParams(location.search).get("project");
  if(S.detailId && linked && linked!==m.active_project_id){
@@ -129,7 +156,7 @@ $("#documents").onclick=e=>{
  if(button)downloadComponentFile("doc",button.dataset.doc,button.dataset.filename).catch(x=>note(x.message));
 };
 $("#detail-back").onclick=()=>location.href="/";
-$("#models-list").onclick=async e=>{try{const previewId=e.target.dataset.modelPreview;if(previewId){const id=S.detailId,models=await req("/api/parts/"+id+"/models"),model=models.find(x=>x.id===previewId);if(model)await load3d(model);return}const mid=e.target.dataset.modelDownload;if(!mid)return;const r=await fetch(url("/api/models/"+mid+"/download"),{headers:{Authorization:"Bearer "+S.token}});if(!r.ok)throw Error("Не удалось скачать модель");const blob=await r.blob(),a=document.createElement("a"),u=URL.createObjectURL(blob);a.href=u;a.download=e.target.dataset.filename||"model";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}catch(x){note(x.message)}};
+$("#models-list").onclick=async e=>{try{const previewId=e.target.dataset.modelPreview;if(previewId){const id=S.detailId,models=await req("/api/parts/"+id+"/models"),model=models.find(x=>x.id===previewId);if(model)await load3d(model);return}const mid=e.target.dataset.modelDownload;if(!mid)return;await downloadBinary("/api/models/"+mid+"/download",e.target.dataset.filename||"model")}catch(x){note(x.message)}};
 $("#model-upload").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,id=S.detailId;try{await req("/api/parts/"+id+"/models",{method:"POST",body:new FormData(form)});form.reset();await showDetail(id);note("3D-модель загружена")}catch(x){note(x.message)}};
 function renderAssembly(items,isAssembly){
  const panel=$("#assembly-panel");
@@ -162,27 +189,10 @@ async function showComponentDetail(partId){
   box.innerHTML='<div class="component-detail-head"><small>ВЫБРАННЫЙ КОМПОНЕНТ</small><h3>'+esc(p.part_code)+'</h3><b>'+esc(p.title)+'</b></div><dl class="component-fields"><div><dt>Тип</dt><dd>'+(p.kind==="assembly"?"Сборка":"Деталь")+'</dd></div><div><dt>Материал</dt><dd>'+esc(p.material||"—")+'</dd></div><div><dt>Масса</dt><dd>'+esc(p.mass||"—")+'</dd></div><div><dt>Габариты</dt><dd>'+esc(p.dimensions||"—")+'</dd></div><div><dt>Ревизия</dt><dd>R'+esc(p.revision)+'</dd></div></dl><p class="component-description">'+esc(p.description||"Описание не заполнено")+'</p><h4>Документы ('+(d.documents||[]).length+')</h4><ul class="component-files">'+(docs||"<li>Документы не добавлены</li>")+'</ul><h4>3D-файлы ('+models.length+')</h4><ul class="component-files">'+(modelRows||"<li>3D-модели не добавлены</li>")+'</ul>';
  }catch(e){box.innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
 }
-async function downloadComponentFile(kind,id,name){
- const path=kind==="doc"?"/api/documents/"+encodeURIComponent(id)+"/download":"/api/models/"+encodeURIComponent(id)+"/download";
- const r=await fetch(url(path),{headers:{Authorization:"Bearer "+S.token}});
- if(!r.ok)throw Error("Не удалось скачать файл");
- const blob=await r.blob(),a=document.createElement("a"),u=URL.createObjectURL(blob);
- a.href=u;a.download=name||"file";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
+async function downloadComponentFile(kind,id,filename){
+ return downloadBinary("/api/"+(kind==="doc"?"documents":"models")+"/"+encodeURIComponent(id)+"/download",filename||"file");
 }
-$("#assembly-search").oninput=()=>renderAssembly(S.assemblyItems,true);
-$("#assembly-rows").onclick=e=>{
- const row=e.target.closest("tr[data-component-id]");if(!row)return;
- showComponentDetail(row.dataset.componentId).catch(x=>note(x.message));
-};
-$("#component-detail").onclick=async e=>{
- try{
-  const doc=e.target.dataset.componentDownloadDoc,model=e.target.dataset.componentDownloadModel,preview=e.target.dataset.componentPreview;
-  if(doc)await downloadComponentFile("doc",doc,e.target.dataset.filename);
-  else if(model)await downloadComponentFile("model",model,e.target.dataset.filename);
-  else if(preview){const models=await req("/api/parts/"+encodeURIComponent(S.selectedComponentId)+"/models"),m=models.find(x=>x.id===preview);if(m)await load3d(m)}
- }catch(x){note(x.message)}
-};
-async function showDetail(id){const d=await req("/api/parts/"+id),p=d.part;renderAssembly(d.bom,p.kind==="assembly");$("#detail-title").textContent=p.title;$("#detail-code").textContent=p.part_code;$("#detail-meta").innerHTML="<div>Тип<b>"+(p.kind==="assembly"?"Сборка":"Деталь")+"</b></div><div>Материал<b>"+esc(p.material||"—")+"</b></div><div>Масса<b>"+esc(p.mass||"—")+"</b></div><div>Габариты<b>"+esc(p.dimensions||"—")+"</b></div><div>Ревизия<b>R"+p.revision+"</b></div>";$("#detail-description").textContent=p.description||"Описание не заполнено";const share=await req("/api/parts/"+id+"/share");displayShare(share);$("#detail-category").innerHTML='<option value="">Без категории</option>'+S.categories.map(c=>'<option value="'+esc(c.id)+'" '+(c.id===p.category_id?"selected":"")+'>'+esc(c.name)+'</option>').join("");$("#documents").innerHTML=d.documents.map(x=>"<li>"+esc(x.original_filename)+' <button type="button" data-doc="'+esc(x.id)+'" data-filename="'+esc(x.original_filename)+'">Скачать</button></li>').join("")||"<li>Файлов пока нет</li>";const models=await req("/api/parts/"+id+"/models");$("#models-list").innerHTML=models.map(m=>'<li>'+esc(m.original_filename)+' ('+m.file_format+') — '+(["STL","OBJ","STEP","STP"].includes(m.file_format)?'<button type="button" data-model-preview="'+m.id+'">просмотр</button> ':"")+'<button type="button" data-model-download="'+m.id+'" data-filename="'+esc(m.original_filename)+'">скачать</button></li>').join("")||"<li>3D-модели не добавлены</li>";const preview=models.find(m=>["STL","OBJ"].includes(m.file_format));if(preview){$("#viewer-fit").disabled=false;await load3d(preview)}else{$("#viewer-fit").disabled=true;$("#viewer-note").textContent=models.length?"STEP/STP сохранён. Для просмотра необходима CAD-конвертация; исходный файл можно скачать.":"Загрузите STL или OBJ для интерактивного просмотра."}}
+async function showDetail(id){const d=await req("/api/parts/"+id),p=d.part;renderAssembly(d.bom,p.kind==="assembly");$("#detail-title").textContent=p.title;$("#detail-code").textContent=p.part_code;$("#detail-meta").innerHTML="<div>Тип<b>"+(p.kind==="assembly"?"Сборка":"Деталь")+"</b></div><div>Материал<b>"+esc(p.material||"—")+"</b></div><div>Масса<b>"+esc(p.mass||"—")+"</b></div><div>Габариты<b>"+esc(p.dimensions||"—")+"</b></div><div>Ревизия<b>R"+p.revision+"</b></div>";$("#detail-description").textContent=p.description||"Описание не заполнено";const share=await req("/api/parts/"+id+"/share");displayShare(share);await displayNumber(id);$("#detail-category").innerHTML='<option value="">Без категории</option>'+S.categories.map(c=>'<option value="'+esc(c.id)+'" '+(c.id===p.category_id?"selected":"")+'>'+esc(c.name)+'</option>').join("");$("#documents").innerHTML=d.documents.map(x=>"<li>"+esc(x.original_filename)+' <button type="button" data-doc="'+esc(x.id)+'" data-filename="'+esc(x.original_filename)+'">Скачать</button></li>').join("")||"<li>Файлов пока нет</li>";const models=await req("/api/parts/"+id+"/models");$("#models-list").innerHTML=models.map(m=>'<li>'+esc(m.original_filename)+' ('+m.file_format+') — '+(["STL","OBJ","STEP","STP"].includes(m.file_format)?'<button type="button" data-model-preview="'+m.id+'">просмотр</button> ':"")+'<button type="button" data-model-download="'+m.id+'" data-filename="'+esc(m.original_filename)+'">скачать</button></li>').join("")||"<li>3D-модели не добавлены</li>";const preview=models.find(m=>["STL","OBJ"].includes(m.file_format));if(preview){$("#viewer-fit").disabled=false;await load3d(preview)}else{$("#viewer-fit").disabled=true;$("#viewer-note").textContent=models.length?"STEP/STP сохранён. Для просмотра необходима CAD-конвертация; исходный файл можно скачать.":"Загрузите STL или OBJ для интерактивного просмотра."}}
 async function load3d(m){
  const noteEl=$("#viewer-note"),canvas=$("#model-view");$("#viewer-fit").disabled=true;$("#model-dimensions").textContent="";
  try{

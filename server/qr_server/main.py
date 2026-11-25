@@ -224,7 +224,7 @@ def download(did:str,u=Depends(current_user)):
     path=Path(r["storage_path"]).resolve()
     if FILES not in path.parents or not path.is_file(): raise HTTPException(404,"Файл отсутствует")
     return FileResponse(path,filename=r["original_filename"])
-from . import features, projects
+from . import features, projects, mobile
 
 if WEB.exists():
     # Windows registry associations can map .js to a non-script MIME type.
