@@ -81,13 +81,23 @@ def main() -> None:
     saved = port_file.read_text().strip() if port_file.exists() else ""
     configured = os.getenv("QR_PORT") or saved
     addresses = lan_addresses()
-    sockets, port = bind_listeners(["127.0.0.1", *addresses], int(configured or "8765"), bool(configured))
+    sockets, port = bind_listeners(["0.0.0.0"], int(configured or "8765"), bool(configured))
     if not saved and not os.getenv("QR_PORT"):
         with port_file.open("x") as f:
             f.write(str(port))
     address = f"http://127.0.0.1:{port}"
     os.environ["QR_LAN_ORIGINS"] = ",".join(f"http://{ip}:{port}" for ip in addresses)
-    print("LAN IP addresses:", os.environ["QR_LAN_ORIGINS"] or "offline; reconnect and restart QR", flush=True)
+    os.environ["QR_LAN_PORT"] = str(port)
+    print("LAN IP addresses:", os.environ["QR_LAN_ORIGINS"] or "offline; connect to Wi-Fi; listener stays available", flush=True)
+    from . import main as qr_main
+    from .mobile import catalogue_id
+    from .discovery import serve_discovery, serve_mdns
+    identity = catalogue_id()
+    print("QR catalogue ID:", identity, flush=True)
+    print("Mobile discovery UDP 8764; HTTP TCP", port, flush=True)
+    stop = threading.Event()
+    threading.Thread(target=serve_discovery, args=(stop, identity, port), daemon=True).start()
+    threading.Thread(target=serve_mdns, args=(stop, identity, port), daemon=True).start()
     print(f"QR is starting at {address}", flush=True)
     print("Keep this window open. Runtime data is stored in the data folder.", flush=True)
 
@@ -102,6 +112,7 @@ def main() -> None:
         if not server.started:
             raise SystemExit(1)
     finally:
+        stop.set()
         for sock in sockets:
             sock.close()
 
