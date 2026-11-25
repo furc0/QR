@@ -1,0 +1,52 @@
+name: Publish QR Mobile v4
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-mobile-v4.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: qr-mobile-v4
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify and build Windows package
+        run: |
+          python -m pip install -r requirements.txt
+          python -m compileall -q server
+          node --check web/app.js
+          PYTHONPATH=server pytest -q tests/runtime
+          printf '4\n' > installer/version.txt
+          python installer/build.py QR_Setup.cmd
+      - name: Retrieve successful Android build
+        run: |
+          gh run download 45628955583 --name QR-Mobile-Android --dir "$RUNNER_TEMP/qr-mobile"
+          test -s "$RUNNER_TEMP/qr-mobile/app-debug.apk"
+          cp "$RUNNER_TEMP/qr-mobile/app-debug.apk" "$RUNNER_TEMP/qr-mobile/QR-Mobile.apk"
+      - name: Commit Windows release and publish downloadable files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add QR_Setup.cmd installer/version.txt installer/release.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish QR Windows build 4 with mobile support"
+            git push origin HEAD:main
+          fi
+          if gh release view qr-mobile-v4 >/dev/null 2>&1; then
+            gh release upload qr-mobile-v4 "$RUNNER_TEMP/qr-mobile/QR-Mobile.apk" QR_Setup.cmd QR_Network.ps1 --clobber
+          else
+            gh release create qr-mobile-v4 "$RUNNER_TEMP/qr-mobile/QR-Mobile.apk" QR_Setup.cmd QR_Network.ps1 --target "$(git rev-parse HEAD)" --title "QR Mobile + Windows build 4" --prerelease --notes "Android 7+ test APK with debug signature. Windows build 4, permanent card numbers, QR/Data Matrix, LAN discovery and mobile pairing. Physical device testing required; HTTP and SQLite remain unencrypted."
+          fi

@@ -1,7 +1,7 @@
 name: QR Mobile and Windows preview
 on:
   push:
-    branches: ["feature/qr-mobile"]
+    branches: [main, "feature/qr-mobile"]
   pull_request:
     branches: [main]
   workflow_dispatch:
