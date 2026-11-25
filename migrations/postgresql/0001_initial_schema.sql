@@ -103,11 +103,12 @@ CREATE TABLE part_revisions (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (part_id, revision_number),
   UNIQUE (id, organization_id),
+  UNIQUE (id, organization_id, part_id),
   FOREIGN KEY (part_id, organization_id) REFERENCES parts(id, organization_id)
 );
 ALTER TABLE parts ADD CONSTRAINT parts_current_revision_fk
-  FOREIGN KEY (current_revision_id, organization_id)
-  REFERENCES part_revisions(id, organization_id)
+  FOREIGN KEY (current_revision_id, organization_id, id)
+  REFERENCES part_revisions(id, organization_id, part_id)
   DEFERRABLE INITIALLY DEFERRED;
 
 CREATE TABLE categories (
@@ -168,7 +169,7 @@ CREATE TABLE bom_items (
   CHECK (assembly_part_id <> component_part_id),
   FOREIGN KEY (assembly_part_id, organization_id) REFERENCES parts(id, organization_id),
   FOREIGN KEY (component_part_id, organization_id) REFERENCES parts(id, organization_id),
-  FOREIGN KEY (component_revision_id, organization_id) REFERENCES part_revisions(id, organization_id)
+  FOREIGN KEY (component_revision_id, organization_id, component_part_id) REFERENCES part_revisions(id, organization_id, part_id)
 );
 CREATE INDEX bom_assembly_order_idx ON bom_items(organization_id, assembly_part_id, position_no) WHERE deleted_at IS NULL;
 CREATE INDEX bom_component_idx ON bom_items(organization_id, component_part_id) WHERE deleted_at IS NULL;
@@ -368,7 +369,7 @@ DO $$
 DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
-    'memberships','roles','membership_roles','parts','part_revisions','categories','part_categories',
+    'roles','membership_roles','parts','part_revisions','categories','part_categories',
     'tags','part_tags','bom_items','part_relations','documents','document_versions',
     'part_documents','qr_routes','licenses','device_installations','license_leases',
     'sync_operations','sync_cursors','sync_conflicts'
@@ -380,7 +381,61 @@ BEGIN
       t
     );
   END LOOP;
-END $$;
+END $;
+
+-- Membership discovery is restricted to the authenticated user set by the trusted API.
+-- Tenant writes still require an active tenant context. The API must never accept this GUC
+-- from an untrusted client; it is set from a verified authentication session.
+ALTER TABLE memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memberships FORCE ROW LEVEL SECURITY;
+CREATE POLICY membership_tenant_or_self ON memberships
+  USING (
+    organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid
+    OR user_id = nullif(current_setting('app.current_user_id', true), '')::uuid
+  )
+  WITH CHECK (
+    organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid
+  );
+
+-- Permission mappings are visible only for roles in the selected tenant.
+ALTER TABLE role_permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE role_permissions FORCE ROW LEVEL SECURITY;
+CREATE POLICY role_permissions_tenant ON role_permissions
+  USING (EXISTS (
+    SELECT 1 FROM roles r
+    WHERE r.id = role_permissions.role_id
+      AND r.organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid
+  ));
+
+-- Entitlements are visible only through a license in the selected tenant.
+ALTER TABLE license_entitlements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE license_entitlements FORCE ROW LEVEL SECURITY;
+CREATE POLICY license_entitlements_tenant ON license_entitlements
+  USING (EXISTS (
+    SELECT 1 FROM licenses l
+    WHERE l.id = license_entitlements.license_id
+      AND l.organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid
+  ));
+
+-- Tenant audit records are isolated. Platform-wide events (organization_id IS NULL)
+-- remain available only to a separately authorized platform-owner service path.
+ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_events FORCE ROW LEVEL SECURITY;
+CREATE POLICY audit_events_tenant ON audit_events
+  USING (
+    organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid
+    OR (
+      organization_id IS NULL
+      AND current_setting('app.is_platform_owner', true) = 'true'
+    )
+  )
+  WITH CHECK (
+    organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid
+    OR (
+      organization_id IS NULL
+      AND current_setting('app.is_platform_owner', true) = 'true'
+    )
+  );
 
 -- Seed permission vocabulary; role grants are provisioned per organization by application bootstrap.
 INSERT INTO permissions(key, description) VALUES
