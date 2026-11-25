@@ -1,6 +1,6 @@
 const $=s=>document.querySelector(s),S={api:localStorage.getItem("qr_api")||"",token:sessionStorage.getItem("qr_token")||"",items:[],categories:[],viewer:null,assemblyItems:[],selectedComponentId:null};
 const url=p=>(S.api?S.api.replace(/\/+$/,""):"")+p;
-const localShareBase=()=>location.protocol+"//127.0.0.1"+(location.port?":"+location.port:"")+"/";
+const localShareBase=()=>"http://127.0.0.1"+(location.port?":"+location.port:"")+"/";
 async function req(p,o={}){const h=new Headers(o.headers||{});if(S.token)h.set("Authorization","Bearer "+S.token);if(o.body&&!(o.body instanceof FormData))h.set("Content-Type","application/json");const r=await fetch(url(p),{...o,headers:h});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.detail||"Ошибка "+r.status);return d}
 function note(t){const x=$("#toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2800)}
 function page(p){["catalog","settings","detail","categories"].forEach(x=>$("#"+x)?.classList.toggle("hidden",x!==p));$("#heading").textContent=({catalog:"Каталог деталей",settings:"Подключение",detail:"Карточка детали",categories:"Категории"})[p];document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x.dataset.page===p))}
