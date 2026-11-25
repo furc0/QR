@@ -25,25 +25,9 @@ Current application features:
 
 Keep the terminal window open. Runtime database and uploaded files are stored in the untracked `data/` directory.
 
-## Public access from the internet with ngrok (Windows)
+## Local-only detail links
 
-The QR server listens on a local loopback address. To let another person open a part or assembly card, create an HTTPS tunnel to the exact port printed by QR:
-
-1. Start QR with \`run_qr.bat\` and keep its console window open. Note the port in the line \`QR is starting at http://127.0.0.1:PORT\`.
-2. Install ngrok and connect your ngrok account using the official ngrok instructions.
-3. Open a **second** PowerShell window and run (replace \`PORT\` with the actual QR port):
-
-   \`\`\`powershell
-   ngrok http PORT
-   \`\`\`
-
-4. Copy the HTTPS forwarding address shown by ngrok, for example \`https://example.ngrok-free.app\`.
-5. In QR, open **Подключение**, paste the address into **Публичный адрес для ссылок (ngrok)**, and click **Сохранить публичный адрес**.
-6. Open a part or assembly card and copy its link. The generated link will use the public ngrok address, not \`127.0.0.1\` or \`localhost\`.
-
-Keep both QR and ngrok console windows running while the link is in use. On the free ngrok plan the public hostname may change when the tunnel restarts; update the public address in QR and copy fresh links after that. Anyone opening a card still needs an account in the organization and must sign in.
-
-**Security:** ngrok makes the QR login page reachable from the internet. The current MVP stores data in unencrypted SQLite and is not hardened for confidential production drawings. Use only test/non-sensitive data until encryption, HTTPS deployment hardening, backups and access controls are completed. Never share an ngrok authentication token.
+Part and assembly links are generated with the loopback address `http://127.0.0.1:<port>/parts/{part_id}`. They open only on the computer running QR, while its local server is running. They are not public links and cannot be opened from another computer or phone. No tunnel (ngrok or similar) is configured by the application.
 
 ## Server placement
 
