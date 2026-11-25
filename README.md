@@ -42,11 +42,13 @@ Do not copy the `.venv/` directory from one computer to another. Python virtual 
 
 The launcher does not remove or recreate `data/`; the SQLite database and uploaded files remain untouched.
 
-## Shared links on the local network
+## One permanent card link
 
-Run QR on one computer. Colleagues on the same trusted LAN open its card links in their browsers and sign in to the project. A card link uses the server computer name, a persistent port, project ID and part ID. Replacing or adding files preserves the link. Keep the server name and data folder when updating. The first available port is saved in the data folder; later launches report a conflict if that port is busy. QR_PORT overrides the saved port.
+Every card can have one HTTPS link of the form `https://<your-domain>/s/<8 characters>`. The database stores the code and the canonical origin. Keep the database and maintain control of the domain. File revisions, project selection, server IP changes and QR upgrades preserve the address. Opening a link requires login and membership in that project. Existing /parts links still work on their original host.
 
-For networks with managed DNS, set QR_SHARE_ORIGIN to a stable HTTP(S) origin. The card also lists IP-based addresses for networks where computer names do not resolve. Reserve the server IP in DHCP before distributing IP-based links. The Windows launcher listens on loopback and the detected private IPv4 addresses. Complete initial administrator setup on the server itself. Allow incoming connections to the printed QR port on the trusted LAN according to your network policy. Restart QR after changing network adapters. Keep the server awake while sharing. Use HTTPS on a managed reverse proxy if the network requires encrypted transport.
+Before issuing the first link, obtain a stable hostname and configure an HTTPS reverse proxy or a managed tunnel with a fixed hostname to the QR server. Set up public DNS and verify access from both the LAN and an external connection. If your router does not support hairpin NAT, use internal DNS pointing the same hostname to an internal HTTPS endpoint. Complete the first administrator setup locally before enabling external access.
+
+Put the HTTPS origin alone in UTF-8 text file `share-origin.txt` in the QR database directory (beside qr.sqlite3), or set `QR_SHARE_ORIGIN` for the server process. The first link issued pins that origin in the database. Without a configured origin QR still supports direct local browsing, and the card explains what is needed to enable sharing. No cards or files are uploaded by this setting.
 
 ## Server placement
 

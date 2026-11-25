@@ -87,8 +87,6 @@ def main() -> None:
             f.write(str(port))
     address = f"http://127.0.0.1:{port}"
     os.environ["QR_LAN_ORIGINS"] = ",".join(f"http://{ip}:{port}" for ip in addresses)
-    os.environ.setdefault("QR_SHARE_ORIGIN", f"http://{socket.gethostname()}:{port}")
-    print("Share address:", os.environ["QR_SHARE_ORIGIN"], flush=True)
     print("LAN IP addresses:", os.environ["QR_LAN_ORIGINS"] or "offline; reconnect and restart QR", flush=True)
     print(f"QR is starting at {address}", flush=True)
     print("Keep this window open. Runtime data is stored in the data folder.", flush=True)
