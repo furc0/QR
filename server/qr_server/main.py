@@ -140,15 +140,21 @@ def parts(q:str="",kind:str="",u=Depends(current_user)):
 @app.post("/api/parts")
 def create_part(data:Part,u=Depends(current_user)):
     if data.kind not in ("part","assembly"): raise HTTPException(400,"Недопустимый тип")
+    part_code,title=data.part_code.strip(),data.title.strip()
+    if not part_code or not title: raise HTTPException(400,"Код и наименование обязательны")
     oid,t,pid=org_for(u),stamp(),str(uuid.uuid4())
     with connect() as c:
         if data.category_id and not c.execute("SELECT 1 FROM categories WHERE id=? AND organization_id=?",(data.category_id,oid)).fetchone():
             raise HTTPException(404,"Категория не найдена в этой организации")
         try:
-            c.execute("INSERT INTO parts(id,organization_id,part_code,title,description,kind,material,mass,dimensions,created_at,updated_at,category_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(pid,oid,data.part_code.strip(),data.title.strip(),data.description,data.kind,data.material,data.mass,data.dimensions,t,t,data.category_id))
+            c.execute("INSERT INTO parts(id,organization_id,part_code,title,description,kind,material,mass,dimensions,created_at,updated_at,category_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(pid,oid,part_code,title,data.description,data.kind,data.material,data.mass,data.dimensions,t,t,data.category_id))
             c.execute("INSERT INTO revisions VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),pid,1,json.dumps(data.model_dump(),ensure_ascii=False),"Создание",t))
         except sqlite3.IntegrityError as exc:
-            if "UNIQUE" in str(exc): raise HTTPException(409,"Код уже используется в этой организации")
+            message = str(exc)
+            if "UNIQUE constraint failed: parts.organization_id, parts.part_code" in message:
+                raise HTTPException(409,"Код уже используется в этой организации")
+            if "FOREIGN KEY constraint failed" in message:
+                raise HTTPException(404,"Категория не найдена в этой организации")
             raise
     return {"id":pid,"revision":1}
 @app.get("/api/parts/{pid}")

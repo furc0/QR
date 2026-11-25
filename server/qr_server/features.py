@@ -133,24 +133,36 @@ async def upload_model(part_id: str, file: UploadFile = File(...), u=Depends(cur
     with connect() as c:
         if not c.execute("SELECT 1 FROM parts WHERE id=? AND organization_id=?",(part_id,oid)).fetchone():
             raise HTTPException(404, "Деталь не найдена")
-    raw = await file.read(250 * 1024 * 1024 + 1)
-    if len(raw) > 250 * 1024 * 1024:
-        raise HTTPException(413, "Максимальный размер 3D-модели — 250 МБ")
-    if not raw:
-        raise HTTPException(400, "Файл модели пуст")
     mid = str(uuid.uuid4())
     folder = MODELS / oid / part_id
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / (mid + ext)
+    temporary = folder / (mid + ext + ".uploading")
+    size_bytes = 0
+    checksum = hashlib.sha256()
     try:
-        with path.open("xb") as stored:
-            stored.write(raw)
+        with temporary.open("xb") as stored:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size_bytes += len(chunk)
+                if size_bytes > 250 * 1024 * 1024:
+                    raise HTTPException(413, "Максимальный размер 3D-модели — 250 МБ")
+                stored.write(chunk)
+                checksum.update(chunk)
+        if size_bytes == 0:
+            raise HTTPException(400, "Файл модели пуст")
+        temporary.replace(path)
         with connect() as c:
             c.execute("INSERT INTO part_models VALUES(?,?,?,?,?,?,?,?,?)",
-                      (mid,oid,part_id,name,ext[1:].upper(),str(path),len(raw),hashlib.sha256(raw).hexdigest(),stamp()))
+                      (mid,oid,part_id,name,ext[1:].upper(),str(path),size_bytes,checksum.hexdigest(),stamp()))
     except Exception:
+        temporary.unlink(missing_ok=True)
         path.unlink(missing_ok=True)
         raise
+    finally:
+        await file.close()
     return {"id":mid,"filename":name,"format":ext[1:].upper(),"size_bytes":len(raw)}
 
 @router.get("/api/models/{model_id}/download")
