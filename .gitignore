@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local QR runtime data, secrets, databases and uploaded files
+data/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Locally installed OpenCascade WebAssembly runtime (downloaded and checksum-verified)
+web/vendor/occt/occt-import-js.wasm
+web/vendor/occt/occt-import-js.wasm.download
