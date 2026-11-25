@@ -16,6 +16,7 @@ db.execute("""INSERT INTO local_parts
 (id,organization_id,part_code,title,kind,status,local_updated_at)
 VALUES
 ('asm-a','org-a','ASM-1','Assembly A','assembly','draft','2026-01-01T00:00:00Z'),
+('asm-b','org-a','ASM-2','Assembly B','assembly','draft','2026-01-01T00:00:00Z'),
 ('part-a','org-a','P-1','Part A','part','draft','2026-01-01T00:00:00Z'),
 ('part-b','org-b','P-1','Part B','part','draft','2026-01-01T00:00:00Z')""")
 
@@ -33,6 +34,19 @@ db.execute("""INSERT INTO local_document_versions
 VALUES('docv-a','org-a','doc-a',1,'opaque/a','abc',10,'{}','clean','2026-01-01T00:00:00Z')""")
 db.execute("""INSERT INTO local_part_documents(organization_id,part_id,document_version_id,document_role)
 VALUES('org-a','part-a','docv-a','drawing')""")
+
+# Nested assembly graph must reject a cycle.
+db.execute("""INSERT INTO local_bom_items
+(id,organization_id,assembly_part_id,component_part_id,quantity,unit_code,local_updated_at)
+VALUES('bom-nested','org-a','asm-a','asm-b','1','pcs','2026-01-01T00:00:00Z')""")
+try:
+    db.execute("""INSERT INTO local_bom_items
+    (id,organization_id,assembly_part_id,component_part_id,quantity,unit_code,local_updated_at)
+    VALUES('bom-cycle','org-a','asm-b','asm-a','1','pcs','2026-01-01T00:00:00Z')""")
+except sqlite3.IntegrityError:
+    pass
+else:
+    raise AssertionError("SQLite accepted a cyclic assembly BOM")
 
 # A BOM revision cannot belong to a different component.
 try:
