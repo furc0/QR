@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from fastapi import Request, FastAPI, Depends, Header, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -225,6 +225,21 @@ def download(did:str,u=Depends(current_user)):
     if FILES not in path.parents or not path.is_file(): raise HTTPException(404,"Файл отсутствует")
     return FileResponse(path,filename=r["original_filename"])
 from . import features, projects, mobile
+
+if "QR_LAN_ORIGINS" in os.environ:
+    import ipaddress
+    _lan = tuple(ipaddress.ip_network(net) for net in ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"))
+    @app.middleware("http")
+    async def local_clients_only(request, call_next):
+        try:
+            ip = ipaddress.ip_address(request.client.host)
+            permitted = any(ip in net for net in _lan)
+        except (AttributeError, ValueError):
+            permitted = False
+        if not permitted:
+            return JSONResponse({"detail": "QR launcher accepts only local network clients"}, status_code=403)
+        return await call_next(request)
+
 
 if WEB.exists():
     # Windows registry associations can map .js to a non-script MIME type.

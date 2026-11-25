@@ -63,3 +63,6 @@ Put the HTTPS origin alone in UTF-8 text file `share-origin.txt` in the QR datab
 - Large STEP assemblies may take significant time and browser memory to tessellate. The source CAD file is preserved unchanged.
 - STL/OBJ files may not contain reliable unit metadata. Confirm units and dimensions in the source CAD system; the viewer is not a certified measuring tool.
 - PostgreSQL adapter, SQLCipher/DPAPI, encrypted file vault, sync, licensing, QR image generation, backups/restore and production deployment hardening remain future work.
+
+## QR Mobile (Android preview)
+See [installation and network testing guide](docs/QR_MOBILE.md). Card numbers are independent of HTTPS share links and are scoped to the catalogue database. Do not use the unencrypted HTTP/SQLite prototype for confidential documentation.
