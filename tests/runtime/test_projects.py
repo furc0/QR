@@ -35,3 +35,42 @@ def test_membership_roles_and_catalogue_switch(tmp_path, monkeypatch):
     assert api.post("/api/project/users", headers=second_worker, json=account).status_code == 403
     assert api.post("/api/projects", headers=second_worker, json={"name":"Blocked"}).status_code == 403
     assert len(api.get("/api/project/users", headers=second_admin).json()) == 2
+
+
+def test_single_permanent_link(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DB", tmp_path / "album.db")
+    monkeypatch.setattr(features, "DATA", tmp_path)
+    monkeypatch.delenv("QR_SHARE_ORIGIN", raising=False)
+    main.init()
+    features.migrate()
+    features.migrate_0002_short_links()
+    api = TestClient(main.app)
+
+    def auth(response):
+        return {"Authorization": "Bearer " + response.json()["token"]}
+
+    admin = auth(api.post("/api/setup", json=dict(display_name="Owner", organization_name="First",
+                  email="owner@qr.test", password="some-password")))
+    second = api.post("/api/projects", headers=admin, json={"name":"Second"}).json()["id"]
+    second_admin = auth(api.post(f"/api/projects/{second}/select", headers=admin))
+    part = api.post("/api/parts", headers=second_admin, json={"part_code":"1","title":"Fixture"}).json()["id"]
+    path = f"/api/parts/{part}/share"
+    assert api.get(path, headers=second_admin).json()["permalink"] is None
+    (tmp_path / "share-origin.txt").write_text("https://qr.example.test")
+    link = api.get(path, headers=second_admin).json()["permalink"]
+    code = link.rsplit("/", 1)[1]
+    assert len(code) == 8 and link == "https://qr.example.test/s/" + code
+    assert api.get("/s/" + code).status_code == 200
+    resolve = "/api/shared/" + code
+    assert api.get(resolve).status_code == 401
+    assert api.get(resolve, headers=admin).json() == {"part_id":part,"project_id":second}
+    account = dict(email="member@qr.test", display_name="Member", password="some-password")
+    api.post("/api/project/users", headers=admin, json=account).raise_for_status()
+    assert api.get(resolve, headers=auth(api.post("/api/login",json=account))).status_code == 404
+    for revision in (b"initial", b"updated"):
+        api.post(f"/api/parts/{part}/documents", headers=second_admin,
+                 files={"file":("drawing.pdf", revision)}).raise_for_status()
+    (tmp_path / "share-origin.txt").unlink()
+    main.init()
+    features.migrate_0002_short_links()
+    assert TestClient(main.app).get(path, headers=second_admin).json()["permalink"] == link

@@ -12,24 +12,17 @@ function saveSetting(storage, key, value) {
  } catch { /* The active connection and token are also held in S. */ }
 }
 const $=s=>document.querySelector(s),S={api:readSetting("localStorage","qr_api"),token:readSetting("sessionStorage","qr_token"),items:[],categories:[],viewer:null,assemblyItems:[],selectedComponentId:null};
+if(location.pathname.startsWith("/s/") && S.api && S.api!==location.origin){
+ S.api=""; S.token="";
+ saveSetting("localStorage","qr_api",""); saveSetting("sessionStorage","qr_token","");
+}
 const url=p=>(S.api?S.api.replace(/\/+$/,""):"")+p;
 function displayShare(share){
- const path=share.url+"?project="+encodeURIComponent(S.project);
- const base=share.origin||S.api||location.origin;
- $("#share-link").value=new URL(path,base).href;
- const alternatives=$("#lan-alternatives");
- alternatives.replaceChildren();
- for(const origin of share.lan_origins){
-  const link=document.createElement("a");
-  link.href=new URL(path,origin).href;
-  link.textContent=link.href;
-  const row=document.createElement("p");
-  row.append("Адрес по IP: ",link);
-  alternatives.append(row);
- }
- if(share.origin && !share.lan_origins.length){
-  alternatives.textContent="Сетевой адрес не найден. Подключите сервер к локальной сети и перезапустите QR.";
- }
+ const field=$("#share-link");
+ field.value=share.permalink||"";
+ field.placeholder="Постоянный HTTPS-адрес пока не настроен";
+ $("#share-copy").disabled=!share.permalink;
+ $("#share-status").textContent=share.permalink?"":"Для выдачи общей ссылки укажите постоянный HTTPS-адрес сервера в файле share-origin.txt в папке базы QR.";
 }
 async function req(p,o={}){const token=S.token;const h=new Headers(o.headers||{});if(S.token)h.set("Authorization","Bearer "+S.token);if(o.body&&!(o.body instanceof FormData))h.set("Content-Type","application/json");const r=await fetch(url(p),{...o,headers:h,signal:o.signal || (o.method ? undefined : AbortSignal.timeout(15000))});const d=await r.json().catch(()=>({}));if(r.status===401 && token && token===S.token && document.body.classList.contains("signed-in")) endSession();if(!r.ok)throw Object.assign(Error(d.detail||"Ошибка "+r.status),{status:r.status});return d}
 function note(t){const x=$("#toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2800)}
@@ -68,8 +61,11 @@ async function start(){
  }
 }
 async function home(){let m=await req("/api/me");
- const linked=new URLSearchParams(location.search).get("project");
- if(location.pathname.startsWith("/parts/") && linked && linked!==m.active_project_id){
+ const code=location.pathname.match(/^\/s\/([A-Za-z0-9_-]+)\/?$/)?.[1];
+ const target=code?await req("/api/shared/"+encodeURIComponent(code)):null;
+ S.detailId=target?.part_id||location.pathname.match(/^\/parts\/([^/]+)/)?.[1];
+ const linked=target?.project_id||new URLSearchParams(location.search).get("project");
+ if(S.detailId && linked && linked!==m.active_project_id){
   await selectProject(linked);
   m=await req("/api/me");
  }
@@ -81,7 +77,7 @@ async function home(){let m=await req("/api/me");
  $("#project-select").replaceChildren(...m.organizations.map(project=>new Option(project.name,project.id,false,project.id===active.id)));
  $("#project-picker").classList.remove("hidden");
  $('[data-page="members"]').classList.toggle("hidden",active.role!=="admin");
- $("#auth").classList.add("hidden");$("#logout").classList.remove("hidden");await loadCategories();const id=location.pathname.match(/^\/parts\/([^/]+)/)?.[1];if(id){page("detail");await showDetail(id)}else{page("catalog");await load()}}
+ $("#auth").classList.add("hidden");$("#logout").classList.remove("hidden");await loadCategories();const id=S.detailId;if(id){page("detail");await showDetail(id)}else{page("catalog");await load()}}
 async function loadCategories(){S.categories=await req("/api/categories");const options=S.categories.map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join("");const sel=$("#part-category");if(sel)sel.innerHTML='<option value="">Без категории</option>'+options;const detail=$("#detail-category");if(detail){const current=detail.value;detail.innerHTML='<option value="">Без категории</option>'+options;detail.value=current}const filter=$("#category-filter");if(filter){const current=filter.value;filter.innerHTML='<option value="">Все категории</option>'+options;filter.value=current}}
 
 function esc(v){return String(v||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -119,7 +115,7 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(!document.b
 $("#category-create").onclick=async()=>{const name=$("#category-name").value.trim();if(!name)return note("Введите название категории");try{await req("/api/categories",{method:"POST",body:JSON.stringify({name})});$("#category-name").value="";await loadCategories();renderCategories();note("Категория создана")}catch(e){note(e.message)}};
 function renderCategories(){$("#category-rows").innerHTML=S.categories.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+c.part_count+'</td><td><button data-rename="'+c.id+'">Переименовать</button> <button data-delete="'+c.id+'">Удалить</button></td></tr>').join("")||'<tr><td colspan="3">Категорий пока нет</td></tr>'}
 $("#category-rows").onclick=async e=>{try{if(e.target.dataset.delete){if(!confirm("Удалить категорию? Детали сохранятся без категории."))return;await req("/api/categories/"+e.target.dataset.delete,{method:"DELETE"})}if(e.target.dataset.rename){const c=S.categories.find(x=>x.id===e.target.dataset.rename),name=prompt("Новое название категории",c.name);if(name===null)return;await req("/api/categories/"+c.id,{method:"PATCH",body:JSON.stringify({name})})}await loadCategories();renderCategories();await load()}catch(x){note(x.message)}};
-$("#detail-category").onchange=async e=>{const id=location.pathname.split("/").pop();try{await req("/api/parts/"+id+"/category",{method:"PATCH",body:JSON.stringify({category_id:e.target.value||null})});note("Категория обновлена")}catch(x){note(x.message)}};
+$("#detail-category").onchange=async e=>{const id=S.detailId;try{await req("/api/parts/"+id+"/category",{method:"PATCH",body:JSON.stringify({category_id:e.target.value||null})});note("Категория обновлена")}catch(x){note(x.message)}};
 $("#share-copy").onclick=async()=>{
  const field=$("#share-link");
  try{
@@ -133,8 +129,8 @@ $("#documents").onclick=e=>{
  if(button)downloadComponentFile("doc",button.dataset.doc,button.dataset.filename).catch(x=>note(x.message));
 };
 $("#detail-back").onclick=()=>location.href="/";
-$("#models-list").onclick=async e=>{try{const previewId=e.target.dataset.modelPreview;if(previewId){const id=location.pathname.split("/").pop(),models=await req("/api/parts/"+id+"/models"),model=models.find(x=>x.id===previewId);if(model)await load3d(model);return}const mid=e.target.dataset.modelDownload;if(!mid)return;const r=await fetch(url("/api/models/"+mid+"/download"),{headers:{Authorization:"Bearer "+S.token}});if(!r.ok)throw Error("Не удалось скачать модель");const blob=await r.blob(),a=document.createElement("a"),u=URL.createObjectURL(blob);a.href=u;a.download=e.target.dataset.filename||"model";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}catch(x){note(x.message)}};
-$("#model-upload").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,id=location.pathname.split("/").pop();try{await req("/api/parts/"+id+"/models",{method:"POST",body:new FormData(form)});form.reset();await showDetail(id);note("3D-модель загружена")}catch(x){note(x.message)}};
+$("#models-list").onclick=async e=>{try{const previewId=e.target.dataset.modelPreview;if(previewId){const id=S.detailId,models=await req("/api/parts/"+id+"/models"),model=models.find(x=>x.id===previewId);if(model)await load3d(model);return}const mid=e.target.dataset.modelDownload;if(!mid)return;const r=await fetch(url("/api/models/"+mid+"/download"),{headers:{Authorization:"Bearer "+S.token}});if(!r.ok)throw Error("Не удалось скачать модель");const blob=await r.blob(),a=document.createElement("a"),u=URL.createObjectURL(blob);a.href=u;a.download=e.target.dataset.filename||"model";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}catch(x){note(x.message)}};
+$("#model-upload").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,id=S.detailId;try{await req("/api/parts/"+id+"/models",{method:"POST",body:new FormData(form)});form.reset();await showDetail(id);note("3D-модель загружена")}catch(x){note(x.message)}};
 function renderAssembly(items,isAssembly){
  const panel=$("#assembly-panel");
  if(!panel)return;

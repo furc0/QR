@@ -1,5 +1,8 @@
 from __future__ import annotations
 import os
+import re
+import secrets
+from urllib.parse import urlsplit
 import hashlib, uuid, sqlite3, unicodedata
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -27,7 +30,15 @@ def migrate():
             checksum_sha256 TEXT NOT NULL, created_at TEXT NOT NULL)""")
         c.execute("CREATE INDEX IF NOT EXISTS part_models_part_idx ON part_models(part_id)")
 
+def migrate_0002_short_links():
+    with connect() as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS share_site(
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1), origin TEXT NOT NULL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS short_links(
+            part_id TEXT PRIMARY KEY REFERENCES parts(id), code TEXT UNIQUE NOT NULL)""")
+
 migrate()
+migrate_0002_short_links()
 
 class CategoryInput(BaseModel):
     name: str = Field(min_length=1, max_length=100)
@@ -101,14 +112,59 @@ def assign_category(part_id: str, data: CategoryAssignment, u=Depends(current_us
                   (data.category_id,stamp(),part_id,oid))
     return {"category_id":data.category_id}
 
+def configured_share_origin():
+    value = os.getenv("QR_SHARE_ORIGIN", "").strip()
+    path = DATA / "share-origin.txt"
+    if not value and path.is_file():
+        value = path.read_text(encoding="utf-8-sig").strip()
+    try:
+        parsed = urlsplit(value)
+        if (parsed.scheme != "https" or not parsed.hostname or "." not in parsed.hostname
+                or not re.fullmatch(r"[a-z0-9.-]+", parsed.hostname)
+                or parsed.username is not None or parsed.password is not None
+                or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+            return None
+        port = parsed.port
+        return "https://" + parsed.hostname + (f":{port}" if port and port != 443 else "")
+    except ValueError:
+        return None
+
+
 @router.get("/api/parts/{part_id}/share")
 def part_share(part_id: str, u=Depends(current_user)):
     oid = org_for(u)
     with connect() as c:
-        if not c.execute("SELECT 1 FROM parts WHERE id=? AND organization_id=?",(part_id,oid)).fetchone():
-            raise HTTPException(404, "Деталь не найдена")
-    return {"url":f"/parts/{part_id}","part_id":part_id,"access":"organization-authenticated",
-            "origin":os.environ.get("QR_SHARE_ORIGIN"),"lan_origins":os.environ.get("QR_LAN_ORIGINS","").split(",") if os.environ.get("QR_LAN_ORIGINS") else []}
+        if not c.execute("SELECT 1 FROM parts WHERE id=? AND organization_id=?", (part_id, oid)).fetchone():
+            raise HTTPException(404, "Карточка не найдена")
+        site = c.execute("SELECT origin FROM share_site WHERE singleton=1").fetchone()
+        if not site:
+            origin = configured_share_origin()
+            if not origin:
+                return {"permalink": None, "url": f"/parts/{part_id}", "part_id": part_id}
+            c.execute("INSERT OR IGNORE INTO share_site VALUES(1,?)", (origin,))
+            site = c.execute("SELECT origin FROM share_site WHERE singleton=1").fetchone()
+        row = c.execute("SELECT code FROM short_links WHERE part_id=?", (part_id,)).fetchone()
+        while not row:
+            c.execute("INSERT OR IGNORE INTO short_links VALUES(?,?)", (part_id, secrets.token_urlsafe(6)))
+            row = c.execute("SELECT code FROM short_links WHERE part_id=?", (part_id,)).fetchone()
+    return {"permalink": site["origin"] + "/s/" + row["code"], "url": f"/parts/{part_id}", "part_id": part_id}
+
+
+@router.get("/api/shared/{code}")
+def resolve_short_link(code: str, u=Depends(current_user)):
+    with connect() as c:
+        row = c.execute("""SELECT p.id AS part_id,p.organization_id AS project_id
+            FROM short_links s JOIN parts p ON p.id=s.part_id
+            JOIN memberships m ON m.organization_id=p.organization_id
+            WHERE s.code=? AND m.user_id=?""", (code, u["id"])).fetchone()
+    if not row:
+        raise HTTPException(404, "Ссылка не найдена или у вас нет доступа к проекту")
+    return dict(row)
+
+
+@router.get("/s/{code}")
+def short_page(code: str):
+    return FileResponse(WEB / "index.html", headers={"Cache-Control": "no-cache"})
 
 @router.get("/parts/{part_id}")
 def part_page(part_id: str):
