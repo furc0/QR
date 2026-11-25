@@ -140,6 +140,7 @@ def test_detail_deep_link_and_bundled_viewer_assets():
     page = client.get("/parts/" + part_id)
     assert page.status_code == 200
     assert 'id="model-view"' in page.text
+    assert 'id="model-dimensions"' in page.text
     assert "/vendor/three/three.min.js" in page.text
     assert "/vendor/occt/occt-import-js.js" in page.text
     assert "cdn.jsdelivr.net" not in page.text
