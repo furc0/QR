@@ -64,3 +64,86 @@ def test_file_upload_and_download():
     downloaded = client.get("/api/documents/" + doc_id + "/download", headers=auth())
     assert downloaded.status_code == 200
     assert downloaded.content == b"QR test drawing"
+
+
+def test_categories_share_links_and_3d_model_upload():
+    part_id = create_part("CAT-3D-01", "Rotor support")
+    created = client.post("/api/categories", headers=auth(), json={"name": "Кронштейны"})
+    assert created.status_code == 200, created.text
+    category_id = created.json()["id"]
+    assigned = client.patch("/api/parts/" + part_id + "/category", headers=auth(),
+                            json={"category_id": category_id})
+    assert assigned.status_code == 200
+    detail = client.get("/api/parts/" + part_id, headers=auth()).json()["part"]
+    assert detail["category_id"] == category_id
+
+    share = client.get("/api/parts/" + part_id + "/share", headers=auth())
+    assert share.status_code == 200
+    assert share.json()["url"] == "/parts/" + part_id
+    assert client.get("/parts/" + part_id).status_code == 200
+
+    model = client.post("/api/parts/" + part_id + "/models", headers=auth(),
+                        files={"file": ("sample.stl", b"solid test\\nendsolid test", "model/stl")})
+    assert model.status_code == 200, model.text
+    model_id = model.json()["id"]
+    listing = client.get("/api/parts/" + part_id + "/models", headers=auth())
+    assert listing.status_code == 200
+    assert listing.json()[0]["file_format"] == "STL"
+    download = client.get("/api/models/" + model_id + "/download", headers=auth())
+    assert download.status_code == 200
+    assert download.content == b"solid test\\nendsolid test"
+
+    deleted = client.delete("/api/categories/" + category_id, headers=auth())
+    assert deleted.status_code == 200
+    assert deleted.json()["parts_preserved"] is True
+    assert client.get("/api/parts/" + part_id, headers=auth()).json()["part"]["category_id"] is None
+
+
+def test_category_names_are_unique_case_insensitively_and_rename_conflicts():
+    first = client.post("/api/categories", headers=auth(), json={"name": "Корпус"})
+    assert first.status_code == 200
+    duplicate = client.post("/api/categories", headers=auth(), json={"name": " корпус "})
+    assert duplicate.status_code == 409
+    second = client.post("/api/categories", headers=auth(), json={"name": "Втулки"})
+    assert second.status_code == 200
+    conflict = client.patch("/api/categories/" + second.json()["id"], headers=auth(),
+                            json={"name": "КОРПУС"})
+    assert conflict.status_code == 409
+
+def test_model_upload_rejects_unsupported_and_empty_files():
+    part_id = create_part("MODEL-VALIDATION", "Model validation")
+    unsupported = client.post("/api/parts/" + part_id + "/models", headers=auth(),
+                              files={"file": ("model.exe", b"nope", "application/octet-stream")})
+    assert unsupported.status_code == 415
+    empty = client.post("/api/parts/" + part_id + "/models", headers=auth(),
+                        files={"file": ("empty.stl", b"", "model/stl")})
+    assert empty.status_code == 400
+
+def test_part_creation_assigns_category_atomically():
+    category = client.post("/api/categories", headers=auth(), json={"name": "Кронштейны"})
+    assert category.status_code == 200
+    created = client.post("/api/parts", headers=auth(), json={
+        "part_code": "ATOMIC-CAT-01", "title": "Support", "kind": "part",
+        "category_id": category.json()["id"]
+    })
+    assert created.status_code == 200, created.text
+    detail = client.get("/api/parts/" + created.json()["id"], headers=auth()).json()["part"]
+    assert detail["category_id"] == category.json()["id"]
+    invalid = client.post("/api/parts", headers=auth(), json={
+        "part_code": "ATOMIC-CAT-02", "title": "Wrong category", "category_id": "not-in-this-org"
+    })
+    assert invalid.status_code == 404
+
+
+def test_detail_deep_link_and_bundled_viewer_assets():
+    part_id = create_part("DETAIL-PAGE-01", "Direct link test")
+    page = client.get("/parts/" + part_id)
+    assert page.status_code == 200
+    assert 'id="model-view"' in page.text
+    assert 'id="model-dimensions"' in page.text
+    assert "/vendor/three/three.min.js" in page.text
+    assert "/vendor/occt/occt-import-js.js" in page.text
+    assert "cdn.jsdelivr.net" not in page.text
+    assert client.get("/vendor/three/three.min.js").status_code == 200
+    assert client.get("/vendor/three/STLLoader.js").status_code == 200
+    assert client.get("/vendor/occt/occt-import-js.js").status_code == 200
