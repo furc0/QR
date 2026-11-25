@@ -1,3 +1,4 @@
+param([switch]$PrepareOnly)
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
 $VenvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
@@ -60,10 +61,11 @@ if (-not $usable) {
     if ($LASTEXITCODE -ne 0) { throw 'Could not prepare .venv.' }
 }
 
-& $VenvPython -m pip --disable-pip-version-check install -r requirements.txt
+& $VenvPython -m pip --disable-pip-version-check install -r requirements-runtime.txt
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Check internet access and restart run_qr.bat.' }
 
 & $VenvPython install_step_runtime.py
+if ($PrepareOnly) { exit 0 }
 $env:PYTHONPATH = Join-Path $PSScriptRoot "server"
 & $VenvPython -m qr_server.launcher --open-browser
 exit $LASTEXITCODE
