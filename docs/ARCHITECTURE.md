@@ -306,3 +306,30 @@ UI организован в отдельном пакете. Бизнес-ко�
 ---
 
 **Важно:** эта архитектура является проектным документом. Она не является доказательством безопасности реализации. До production необходимы threat model, review криптографической схемы, тестирование и независимый security assessment.
+
+
+## 15. Утверждённая физическая модель данных (2026-11-25)
+
+Решения по модели данных зафиксированы и реализуются в `docs/DATA_MODEL.md` и каталогах `migrations/`.
+
+- `part_code` уникален только внутри организации: `UNIQUE(organization_id, part_code)`.
+- Пользователь может иметь несколько membership; роль назначается membership и всегда ограничена его организацией.
+- Сборка моделируется как `parts.kind='assembly'`; её состав — отдельные строки `bom_items` с количеством, единицей, порядком и опциональной фиксацией ревизии компонента.
+- История версий документов не ограничивается искусственным количеством версий. Каждая загрузка создаёт неизменяемую `document_version`.
+- PostgreSQL — серверная authority; SQLCipher SQLite — локальная offline-проекция. Tenant isolation обеспечивается одновременно сервисным tenant context, составными FK и PostgreSQL RLS.
+- Миграции PostgreSQL и SQLite ведутся раздельно. Применённые миграции не редактируются; изменения оформляются новыми номерами.
+
+### 15.1 Требования к BOM
+
+Перед публикацией состава backend обязан проверить, что родитель имеет kind=assembly, компоненты принадлежат тому же tenant, выбранная ревизия принадлежит указанному компоненту, а граф вложенных сборок не содержит циклов. Проверка цикла выполняется транзакционно. PostgreSQL FK предотвращают межорганизационные ссылки, но сами по себе не проверяют семантику kind и циклы.
+
+### 15.2 Безопасное применение миграций
+
+Миграции запускаются отдельной ролью. Runtime API role не является владельцем таблиц, не имеет BYPASSRLS и работает с tenant-таблицами только после установки проверенного `app.current_organization_id` через `SET LOCAL` внутри транзакции. Production применению предшествуют прогон на чистой временной БД, RLS/tenant tests, backup и rehearsal восстановления.
+
+
+## 16. Migration audit hardening
+
+The initial migrations now enforce revision ownership with composite foreign keys, immutable revision/document-version/audit rows, tenant-aware membership bootstrap, and cycle-free BOM validation at both server and offline database boundaries. PostgreSQL serializes BOM graph changes per organization using a transaction-scoped advisory lock before checking for cycles. SQLite applies equivalent local triggers. Automated migration checks are defined in `.github/workflows/database-migrations.yml` and `tests/migrations/`.
+
+The membership bootstrap uses a trusted API-set `app.current_user_id` setting to reveal only the authenticated user's own memberships before tenant selection. The API then verifies membership and sets `app.current_organization_id`. Neither setting may be populated from arbitrary client input.

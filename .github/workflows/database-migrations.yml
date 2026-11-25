@@ -1,0 +1,56 @@
+name: Database migration checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "migrations/**"
+      - "tests/migrations/**"
+      - ".github/workflows/database-migrations.yml"
+  push:
+    branches: [main]
+    paths:
+      - "migrations/**"
+      - "tests/migrations/**"
+      - ".github/workflows/database-migrations.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  postgresql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qr_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d qr_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply initial schema
+        env:
+          PGPASSWORD: postgres
+        run: psql "host=localhost port=5432 dbname=qr_test user=postgres sslmode=disable" -v ON_ERROR_STOP=1 -f migrations/postgresql/0001_initial_schema.sql
+      - name: Verify tenant isolation, BOM integrity and immutability
+        env:
+          PGPASSWORD: postgres
+        run: psql "host=localhost port=5432 dbname=qr_test user=postgres sslmode=disable" -v ON_ERROR_STOP=1 -f tests/migrations/postgresql/verify.sql
+
+  sqlite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply schema and verify foreign keys
+        run: python tests/migrations/sqlite/verify.py migrations/sqlite/0001_local_schema.sql
