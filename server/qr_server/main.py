@@ -193,4 +193,4 @@ def download(did:str,u=Depends(current_user)):
     path=Path(r["storage_path"]).resolve()
     if FILES not in path.parents or not path.is_file(): raise HTTPException(404,"Файл отсутствует")
     return FileResponse(path,filename=r["original_filename"])
-if WEB.exists(): app.mount("/",StaticFiles(directory=WEB,html=True),name="web")
+from . import features\n\nif WEB.exists(): app.mount("/",StaticFiles(directory=WEB,html=True),name="web")
