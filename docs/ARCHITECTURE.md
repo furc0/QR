@@ -326,3 +326,10 @@ UI организован в отдельном пакете. Бизнес-ко�
 ### 15.2 Безопасное применение миграций
 
 Миграции запускаются отдельной ролью. Runtime API role не является владельцем таблиц, не имеет BYPASSRLS и работает с tenant-таблицами только после установки проверенного `app.current_organization_id` через `SET LOCAL` внутри транзакции. Production применению предшествуют прогон на чистой временной БД, RLS/tenant tests, backup и rehearsal восстановления.
+
+
+## 16. Migration audit hardening
+
+The initial migrations now enforce revision ownership with composite foreign keys, immutable revision/document-version/audit rows, tenant-aware membership bootstrap, and cycle-free BOM validation at both server and offline database boundaries. PostgreSQL serializes BOM graph changes per organization using a transaction-scoped advisory lock before checking for cycles. SQLite applies equivalent local triggers. Automated migration checks are defined in `.github/workflows/database-migrations.yml` and `tests/migrations/`.
+
+The membership bootstrap uses a trusted API-set `app.current_user_id` setting to reveal only the authenticated user's own memberships before tenant selection. The API then verifies membership and sets `app.current_organization_id`. Neither setting may be populated from arbitrary client input.
