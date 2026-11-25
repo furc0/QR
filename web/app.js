@@ -74,7 +74,7 @@ async function load3d(m){
   }
   else throw Error("Формат этой 3D-модели не поддерживается для просмотра.");const bounds=new THREE.Box3().setFromObject(object),center=bounds.getCenter(new THREE.Vector3()),size=bounds.getSize(new THREE.Vector3()),maxDim=Math.max(size.x,size.y,size.z);
   if(!Number.isFinite(maxDim)||maxDim<=0)throw Error("В модели нет корректной геометрии.");
-  object.position.sub(center);scene.add(object);
+  object.position.sub(center);scene.add(object);const dimensionUnit=(m.file_format==="STEP"||m.file_format==="STP")?"мм (выход OpenCascade)":"единицы исходной модели — не определены";$("#model-dimensions").textContent="Габариты модели: "+size.x.toFixed(2)+" × "+size.y.toFixed(2)+" × "+size.z.toFixed(2)+" "+dimensionUnit;
   const grid=new THREE.GridHelper(maxDim*4,20,0x38505b,0x263943);grid.position.y=-size.y/2;scene.add(grid);
   const target=new THREE.Vector3(0,0,0),radius=maxDim/2;
   const fit=()=>{const distance=(radius/Math.sin(THREE.MathUtils.degToRad(camera.fov/2)))*1.25;camera.position.copy(target).add(new THREE.Vector3(distance*.9,distance*.72,distance*1.05));camera.near=Math.max(radius/10000,.001);camera.far=Math.max(radius*100,1000);camera.updateProjectionMatrix();camera.lookAt(target)};
