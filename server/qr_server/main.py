@@ -4,7 +4,7 @@ import hashlib, hmac, json, os, secrets, sqlite3, time, uuid, base64
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from fastapi import FastAPI, Depends, Header, HTTPException, File, UploadFile
+from fastapi import Request, FastAPI, Depends, Header, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -126,7 +126,9 @@ def setup_status():
     with connect() as c: n=c.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
     return {"setup_required":n==0}
 @app.post("/api/setup")
-def setup(data:Setup):
+def setup(data:Setup, request:Request):
+    if "QR_LAN_ORIGINS" in os.environ and (not request.client or request.client.host != "127.0.0.1"):
+        raise HTTPException(403,"Создайте первого администратора на компьютере сервера через 127.0.0.1.")
     with connect() as c:
         if c.execute("SELECT 1 FROM users LIMIT 1").fetchone(): raise HTTPException(409,"Первичная настройка уже выполнена")
         uid,oid,t=str(uuid.uuid4()),str(uuid.uuid4()),stamp()

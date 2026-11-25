@@ -13,7 +13,24 @@ function saveSetting(storage, key, value) {
 }
 const $=s=>document.querySelector(s),S={api:readSetting("localStorage","qr_api"),token:readSetting("sessionStorage","qr_token"),items:[],categories:[],viewer:null,assemblyItems:[],selectedComponentId:null};
 const url=p=>(S.api?S.api.replace(/\/+$/,""):"")+p;
-const localShareBase=()=>"http://127.0.0.1"+(location.port?":"+location.port:"")+"/";
+function displayShare(share){
+ const path=share.url+"?project="+encodeURIComponent(S.project);
+ const base=share.origin||S.api||location.origin;
+ $("#share-link").value=new URL(path,base).href;
+ const alternatives=$("#lan-alternatives");
+ alternatives.replaceChildren();
+ for(const origin of share.lan_origins){
+  const link=document.createElement("a");
+  link.href=new URL(path,origin).href;
+  link.textContent=link.href;
+  const row=document.createElement("p");
+  row.append("Адрес по IP: ",link);
+  alternatives.append(row);
+ }
+ if(share.origin && !share.lan_origins.length){
+  alternatives.textContent="Сетевой адрес не найден. Подключите сервер к локальной сети и перезапустите QR.";
+ }
+}
 async function req(p,o={}){const token=S.token;const h=new Headers(o.headers||{});if(S.token)h.set("Authorization","Bearer "+S.token);if(o.body&&!(o.body instanceof FormData))h.set("Content-Type","application/json");const r=await fetch(url(p),{...o,headers:h,signal:o.signal || (o.method ? undefined : AbortSignal.timeout(15000))});const d=await r.json().catch(()=>({}));if(r.status===401 && token && token===S.token && document.body.classList.contains("signed-in")) endSession();if(!r.ok)throw Object.assign(Error(d.detail||"Ошибка "+r.status),{status:r.status});return d}
 function note(t){const x=$("#toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2800)}
 function page(p){if(!document.body.classList.contains("signed-in"))return;$("#boot").classList.add("hidden");["catalog","settings","detail","categories","members"].forEach(x=>$("#"+x)?.classList.toggle("hidden",x!==p));$("#heading").textContent=({catalog:"Каталог деталей",settings:"Подключение",detail:"Карточка детали",categories:"Категории",members:"Пользователи и проекты"})[p];document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x.dataset.page===p))}
@@ -103,7 +120,18 @@ $("#category-create").onclick=async()=>{const name=$("#category-name").value.tri
 function renderCategories(){$("#category-rows").innerHTML=S.categories.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+c.part_count+'</td><td><button data-rename="'+c.id+'">Переименовать</button> <button data-delete="'+c.id+'">Удалить</button></td></tr>').join("")||'<tr><td colspan="3">Категорий пока нет</td></tr>'}
 $("#category-rows").onclick=async e=>{try{if(e.target.dataset.delete){if(!confirm("Удалить категорию? Детали сохранятся без категории."))return;await req("/api/categories/"+e.target.dataset.delete,{method:"DELETE"})}if(e.target.dataset.rename){const c=S.categories.find(x=>x.id===e.target.dataset.rename),name=prompt("Новое название категории",c.name);if(name===null)return;await req("/api/categories/"+c.id,{method:"PATCH",body:JSON.stringify({name})})}await loadCategories();renderCategories();await load()}catch(x){note(x.message)}};
 $("#detail-category").onchange=async e=>{const id=location.pathname.split("/").pop();try{await req("/api/parts/"+id+"/category",{method:"PATCH",body:JSON.stringify({category_id:e.target.value||null})});note("Категория обновлена")}catch(x){note(x.message)}};
-$("#share-copy").onclick=()=>{navigator.clipboard.writeText($("#share-link").value).then(()=>note("Ссылка скопирована")).catch(()=>note("Не удалось скопировать ссылку"))};
+$("#share-copy").onclick=async()=>{
+ const field=$("#share-link");
+ try{
+  if(navigator.clipboard){await navigator.clipboard.writeText(field.value);note("Ссылка скопирована");return}
+ }catch{}
+ field.focus();field.select();
+ note(document.execCommand("copy")?"Ссылка скопирована":"Нажмите Ctrl+C, чтобы скопировать ссылку");
+};
+$("#documents").onclick=e=>{
+ const button=e.target.closest("[data-doc]");
+ if(button)downloadComponentFile("doc",button.dataset.doc,button.dataset.filename).catch(x=>note(x.message));
+};
 $("#detail-back").onclick=()=>location.href="/";
 $("#models-list").onclick=async e=>{try{const previewId=e.target.dataset.modelPreview;if(previewId){const id=location.pathname.split("/").pop(),models=await req("/api/parts/"+id+"/models"),model=models.find(x=>x.id===previewId);if(model)await load3d(model);return}const mid=e.target.dataset.modelDownload;if(!mid)return;const r=await fetch(url("/api/models/"+mid+"/download"),{headers:{Authorization:"Bearer "+S.token}});if(!r.ok)throw Error("Не удалось скачать модель");const blob=await r.blob(),a=document.createElement("a"),u=URL.createObjectURL(blob);a.href=u;a.download=e.target.dataset.filename||"model";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}catch(x){note(x.message)}};
 $("#model-upload").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,id=location.pathname.split("/").pop();try{await req("/api/parts/"+id+"/models",{method:"POST",body:new FormData(form)});form.reset();await showDetail(id);note("3D-модель загружена")}catch(x){note(x.message)}};
@@ -158,7 +186,7 @@ $("#component-detail").onclick=async e=>{
   else if(preview){const models=await req("/api/parts/"+encodeURIComponent(S.selectedComponentId)+"/models"),m=models.find(x=>x.id===preview);if(m)await load3d(m)}
  }catch(x){note(x.message)}
 };
-async function showDetail(id){const d=await req("/api/parts/"+id),p=d.part;renderAssembly(d.bom,p.kind==="assembly");$("#detail-title").textContent=p.title;$("#detail-code").textContent=p.part_code;$("#detail-meta").innerHTML="<div>Тип<b>"+(p.kind==="assembly"?"Сборка":"Деталь")+"</b></div><div>Материал<b>"+esc(p.material||"—")+"</b></div><div>Масса<b>"+esc(p.mass||"—")+"</b></div><div>Габариты<b>"+esc(p.dimensions||"—")+"</b></div><div>Ревизия<b>R"+p.revision+"</b></div>";$("#detail-description").textContent=p.description||"Описание не заполнено";const share=await req("/api/parts/"+id+"/share");$("#share-link").value=new URL(share.url+"?project="+encodeURIComponent(S.project),localShareBase()).href;$("#detail-category").innerHTML='<option value="">Без категории</option>'+S.categories.map(c=>'<option value="'+esc(c.id)+'" '+(c.id===p.category_id?"selected":"")+'>'+esc(c.name)+'</option>').join("");$("#documents").innerHTML=d.documents.map(x=>"<li>"+esc(x.original_filename)+"</li>").join("")||"<li>Файлов пока нет</li>";const models=await req("/api/parts/"+id+"/models");$("#models-list").innerHTML=models.map(m=>'<li>'+esc(m.original_filename)+' ('+m.file_format+') — '+(["STL","OBJ","STEP","STP"].includes(m.file_format)?'<button type="button" data-model-preview="'+m.id+'">просмотр</button> ':"")+'<button type="button" data-model-download="'+m.id+'" data-filename="'+esc(m.original_filename)+'">скачать</button></li>').join("")||"<li>3D-модели не добавлены</li>";const preview=models.find(m=>["STL","OBJ"].includes(m.file_format));if(preview){$("#viewer-fit").disabled=false;await load3d(preview)}else{$("#viewer-fit").disabled=true;$("#viewer-note").textContent=models.length?"STEP/STP сохранён. Для просмотра необходима CAD-конвертация; исходный файл можно скачать.":"Загрузите STL или OBJ для интерактивного просмотра."}}
+async function showDetail(id){const d=await req("/api/parts/"+id),p=d.part;renderAssembly(d.bom,p.kind==="assembly");$("#detail-title").textContent=p.title;$("#detail-code").textContent=p.part_code;$("#detail-meta").innerHTML="<div>Тип<b>"+(p.kind==="assembly"?"Сборка":"Деталь")+"</b></div><div>Материал<b>"+esc(p.material||"—")+"</b></div><div>Масса<b>"+esc(p.mass||"—")+"</b></div><div>Габариты<b>"+esc(p.dimensions||"—")+"</b></div><div>Ревизия<b>R"+p.revision+"</b></div>";$("#detail-description").textContent=p.description||"Описание не заполнено";const share=await req("/api/parts/"+id+"/share");displayShare(share);$("#detail-category").innerHTML='<option value="">Без категории</option>'+S.categories.map(c=>'<option value="'+esc(c.id)+'" '+(c.id===p.category_id?"selected":"")+'>'+esc(c.name)+'</option>').join("");$("#documents").innerHTML=d.documents.map(x=>"<li>"+esc(x.original_filename)+' <button type="button" data-doc="'+esc(x.id)+'" data-filename="'+esc(x.original_filename)+'">Скачать</button></li>').join("")||"<li>Файлов пока нет</li>";const models=await req("/api/parts/"+id+"/models");$("#models-list").innerHTML=models.map(m=>'<li>'+esc(m.original_filename)+' ('+m.file_format+') — '+(["STL","OBJ","STEP","STP"].includes(m.file_format)?'<button type="button" data-model-preview="'+m.id+'">просмотр</button> ':"")+'<button type="button" data-model-download="'+m.id+'" data-filename="'+esc(m.original_filename)+'">скачать</button></li>').join("")||"<li>3D-модели не добавлены</li>";const preview=models.find(m=>["STL","OBJ"].includes(m.file_format));if(preview){$("#viewer-fit").disabled=false;await load3d(preview)}else{$("#viewer-fit").disabled=true;$("#viewer-note").textContent=models.length?"STEP/STP сохранён. Для просмотра необходима CAD-конвертация; исходный файл можно скачать.":"Загрузите STL или OBJ для интерактивного просмотра."}}
 async function load3d(m){
  const noteEl=$("#viewer-note"),canvas=$("#model-view");$("#viewer-fit").disabled=true;$("#model-dimensions").textContent="";
  try{
