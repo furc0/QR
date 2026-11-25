@@ -6,7 +6,7 @@ from install_step_runtime import (
 
 
 def test_git_blob_sha1_uses_git_object_format():
-    assert git_blob_sha1_bytes(b"hello world\n") == "ce013625030ba8dba906f756967f9e9ca394464a"
+    assert git_blob_sha1_bytes(b"hello\n") == "ce013625030ba8dba906f756967f9e9ca394464a"
 
 
 def test_step_runtime_is_pinned_to_expected_binary():

@@ -148,3 +148,23 @@ def test_detail_deep_link_and_bundled_viewer_assets():
     assert client.get("/vendor/three/three.min.js").status_code == 200
     assert client.get("/vendor/three/STLLoader.js").status_code == 200
     assert client.get("/vendor/occt/occt-import-js.js").status_code == 200
+
+
+def test_catalogue_boot_assets():
+    for path in ("/", "/parts/example"):
+        page = client.get(path)
+        assert 'id="boot"' in page.text
+        assert page.headers["cache-control"] == "no-cache"
+    script = client.get("/app.js?v=2")
+    assert script.status_code == 200
+    assert "javascript" in script.headers["content-type"]
+    assert script.headers["cache-control"] == "no-cache"
+
+
+def test_private_sections_require_authentication_and_are_not_cached():
+    for path in ("/api/me", "/api/parts", "/api/categories", "/api/project/users",
+                 "/api/parts/sample", "/api/parts/sample/models",
+                 "/api/documents/sample/download", "/api/models/sample/download"):
+        response = client.get(path)
+        assert response.status_code == 401, path
+        assert response.headers["cache-control"] == "no-store"

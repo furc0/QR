@@ -1,4 +1,5 @@
 from __future__ import annotations
+import mimetypes
 import hashlib, hmac, json, os, secrets, sqlite3, time, uuid, base64
 from contextlib import contextmanager
 from pathlib import Path
@@ -56,8 +57,8 @@ def pw_ok(password,encoded):
 def secret():
     if not SECRET.exists(): SECRET.write_bytes(secrets.token_bytes(32))
     return SECRET.read_bytes()
-def make_token(uid):
-    body=base64.urlsafe_b64encode(json.dumps({"sub":uid,"exp":int(time.time())+1209600},separators=(",",":")).encode()).rstrip(b"=")
+def make_token(uid, project_id=None):
+    body=base64.urlsafe_b64encode(json.dumps({"sub":uid,"project":project_id,"exp":int(time.time())+1209600},separators=(",",":")).encode()).rstrip(b"=")
     sig=hmac.new(secret(),body,hashlib.sha256).digest()
     return (body+b"."+base64.urlsafe_b64encode(sig).rstrip(b"=")).decode()
 def current_user(authorization:str|None=Header(default=None)):
@@ -70,12 +71,29 @@ def current_user(authorization:str|None=Header(default=None)):
         if p["exp"]<int(time.time()): raise ValueError()
         with connect() as c: u=c.execute("SELECT * FROM users WHERE id=?",(p["sub"],)).fetchone()
         if not u: raise ValueError()
-        return u
+        user = dict(u)
     except Exception: raise HTTPException(401,"Сессия недействительна. Войдите снова.")
+    # Older sessions have no project claim. Keep their original first workspace.
+    project = p.get("project")
+    with connect() as c:
+        sql = "SELECT organization_id, role FROM memberships WHERE user_id=?"
+        args = [user["id"]]
+        if project is not None:
+            sql += " AND organization_id=?"
+            args.append(project)
+        membership = c.execute(sql + " ORDER BY rowid LIMIT 1", args).fetchone()
+    if not membership:
+        raise HTTPException(403, "Нет доступа к проекту")
+    user.update(dict(membership))
+    return user
+
 def org_for(user):
-    with connect() as c: r=c.execute("SELECT organization_id FROM memberships WHERE user_id=? ORDER BY rowid LIMIT 1",(user["id"],)).fetchone()
-    if not r: raise HTTPException(403,"Нет членства в организации")
-    return r["organization_id"]
+    return user["organization_id"]
+
+def project_admin(user=Depends(current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Требуются права администратора проекта")
+    return user
 
 class Setup(BaseModel):
     email:str=Field(min_length=5,max_length=254)
@@ -126,8 +144,8 @@ def login(data:Login):
 @app.get("/api/me")
 def me(u=Depends(current_user)):
     with connect() as c:
-        orgs=c.execute("SELECT o.id,o.name,m.role FROM organizations o JOIN memberships m ON m.organization_id=o.id WHERE m.user_id=?",(u["id"],)).fetchall()
-    return {"user":{"id":u["id"],"email":u["email"],"display_name":u["display_name"]},"organizations":[dict(x) for x in orgs]}
+        orgs=c.execute("SELECT o.id,o.name,m.role FROM organizations o JOIN memberships m ON m.organization_id=o.id WHERE m.user_id=? ORDER BY m.rowid",(u["id"],)).fetchall()
+    return {"active_project_id":org_for(u),"user":{"id":u["id"],"email":u["email"],"display_name":u["display_name"]},"organizations":[dict(x) for x in orgs]}
 @app.get("/api/parts")
 def parts(q:str="",kind:str="",u=Depends(current_user)):
     oid=org_for(u); sql="SELECT * FROM parts WHERE organization_id=?"; args=[oid]
@@ -192,7 +210,7 @@ async def upload(pid:str,file:UploadFile=File(...),u=Depends(current_user)):
     did,vid=str(uuid.uuid4()),str(uuid.uuid4()); folder=FILES/oid/pid/did; folder.mkdir(parents=True,exist_ok=True)
     path=folder/"v1.bin"; path.write_bytes(raw); name=Path(file.filename or "document.bin").name[:240]
     with connect() as c:
-        c.execute("INSERT INTO documents VALUES(?,?,?,?)",(did,oid,pid,name,t))
+        c.execute("INSERT INTO documents VALUES(?,?,?,?,?)",(did,oid,pid,name,t))
         c.execute("INSERT INTO document_versions VALUES(?,?,?,?,?,?,?,?)",(vid,did,1,str(path),file.content_type or "application/octet-stream",len(raw),hashlib.sha256(raw).hexdigest(),t))
     return {"document_id":did,"filename":name,"size_bytes":len(raw)}
 @app.get("/api/documents/{did}/download")
@@ -204,7 +222,21 @@ def download(did:str,u=Depends(current_user)):
     path=Path(r["storage_path"]).resolve()
     if FILES not in path.parents or not path.is_file(): raise HTTPException(404,"Файл отсутствует")
     return FileResponse(path,filename=r["original_filename"])
-from . import features
+from . import features, projects
 
 if WEB.exists():
+    # Windows registry associations can map .js to a non-script MIME type.
+    mimetypes.add_type("text/javascript", ".js")
+    mimetypes.add_type("text/css", ".css")
+    mimetypes.add_type("application/wasm", ".wasm")
+
+    @app.middleware("http")
+    async def revalidate_ui(request, call_next):
+        response = await call_next(request)
+        if request.url.path in ("/", "/index.html", "/app.js", "/style.css") or request.url.path.startswith("/parts/"):
+            response.headers["Cache-Control"] = "no-cache"
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     app.mount("/", StaticFiles(directory=WEB, html=True), name="web")

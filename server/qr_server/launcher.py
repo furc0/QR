@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import os
 import socket
+import threading
+import webbrowser
 
 import uvicorn
 
@@ -25,6 +28,9 @@ def create_server_socket(start_port: int = 8765, host: str = "127.0.0.1") -> tup
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--open-browser", action="store_true")
+    options = parser.parse_args()
     preferred_port = int(os.getenv("QR_PORT", "8765"))
     server_socket, port = create_server_socket(preferred_port)
     address = f"http://127.0.0.1:{port}"
@@ -39,7 +45,14 @@ def main() -> None:
 
     config = uvicorn.Config("qr_server.main:app", host="127.0.0.1", port=port, log_level="info")
     try:
-        uvicorn.Server(config).run(sockets=[server_socket])
+        # The socket is already listening. The browser request will be served
+        # after Uvicorn finishes application startup.
+        if options.open_browser:
+            threading.Thread(target=webbrowser.open, args=(address,), daemon=True).start()
+        server = uvicorn.Server(config)
+        server.run(sockets=[server_socket])
+        if not server.started:
+            raise SystemExit(1)
     finally:
         server_socket.close()
 

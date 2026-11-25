@@ -15,21 +15,30 @@ Current application features:
 - STEP/STP files can be uploaded, downloaded and previewed through the pinned OpenCascade WebAssembly importer. The first Windows launch attempts to download the pinned 7.6 MB WASM runtime and verifies its Git blob SHA-1; QR still starts if the download is unavailable.
 - Windows launchers automatically select a free port starting at 8765.
 
-## Run on Windows
+## Install on Windows with one file
 
-1. Install Python 3.11 or newer, including the Windows Python Launcher (`py`).
-2. Clone/download this repository.
-3. Double-click `run_qr.bat`, or run `./run_qr.ps1` in PowerShell.
-4. Open the exact address printed in the terminal.
-5. On first launch, create the administrator and organization.
+Download **QR_Setup.cmd** from this release or branch (use Download raw file on GitHub) and double-click it. The program files are embedded. Internet is required on the first installation for Python and its packages. Use the **QR Album** desktop shortcut afterwards. Close the old QR server before opening a newer installer.
 
-Keep the terminal window open. Runtime database and uploaded files are stored in the untracked `data/` directory.
+The installer stores its private runtime under `%LOCALAPPDATA%\QR-Album`. Existing users can retain their original database and file paths. On first installation QR checks `QR_DATA_DIR`, the installer directory and the former `C:\QR_ALBUM` layout. If several databases are found it offers a numbered choice. For a custom location, place the installer next to the existing `qr.sqlite3` file. A new catalogue defaults to `%LOCALAPPDATA%\QR-Album\data`.
+
+Updates remove an earlier installer-managed release only after the replacement has opened the catalogue and only if the previous file inventory still matches. Original source folders and system Python installations are preserved.
+
+To rebuild the distributable after changing runtime code, run `python installer/build.py QR_Setup.cmd`.
+
+## Run from a source checkout on Windows
+
+1. Update the existing project folder, or download and extract the repository ZIP for a new installation.
+2. Double-click **run_qr.bat**. On the first run, internet access is required. The launcher finds Python 3.11+ or installs Python 3.13 for the current user, prepares the virtual environment and installs dependencies.
+3. The default browser opens at the selected local address. Create an administrator on a new installation or sign in to the existing catalogue.
+4. Keep the terminal open while using QR. After updating, stop the old server window with Ctrl+C and launch the same BAT again.
+
+Runtime database and uploaded files are stored in the untracked `data/` directory.
 
 ### Moving QR to another computer
 
 Do not copy the `.venv/` directory from one computer to another. Python virtual environments contain machine-specific paths to the base Python installation and are not portable. If a copied `.venv` is detected, the Windows launchers test it and recreate only that directory when its interpreter cannot start. Dependencies are then installed on the destination computer.
 
-The launcher does not remove or recreate `data/`; the SQLite database and uploaded files remain untouched. Python 3.11 or newer must be installed on each computer.
+The launcher does not remove or recreate `data/`; the SQLite database and uploaded files remain untouched.
 
 ## Local-only detail links
 

@@ -1,25 +1,104 @@
-const $=s=>document.querySelector(s),S={api:localStorage.getItem("qr_api")||"",token:sessionStorage.getItem("qr_token")||"",items:[],categories:[],viewer:null,assemblyItems:[],selectedComponentId:null};
+(()=>{
+// Private browsing and managed browser profiles may deny storage access.
+// Keep the current session usable in memory in that case.
+function readSetting(storage, key) {
+ try { return window[storage].getItem(key) || ""; }
+ catch { return ""; }
+}
+function saveSetting(storage, key, value) {
+ try {
+  if (value) window[storage].setItem(key, value);
+  else window[storage].removeItem(key);
+ } catch { /* The active connection and token are also held in S. */ }
+}
+const $=s=>document.querySelector(s),S={api:readSetting("localStorage","qr_api"),token:readSetting("sessionStorage","qr_token"),items:[],categories:[],viewer:null,assemblyItems:[],selectedComponentId:null};
 const url=p=>(S.api?S.api.replace(/\/+$/,""):"")+p;
 const localShareBase=()=>"http://127.0.0.1"+(location.port?":"+location.port:"")+"/";
-async function req(p,o={}){const h=new Headers(o.headers||{});if(S.token)h.set("Authorization","Bearer "+S.token);if(o.body&&!(o.body instanceof FormData))h.set("Content-Type","application/json");const r=await fetch(url(p),{...o,headers:h});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.detail||"Ошибка "+r.status);return d}
+async function req(p,o={}){const token=S.token;const h=new Headers(o.headers||{});if(S.token)h.set("Authorization","Bearer "+S.token);if(o.body&&!(o.body instanceof FormData))h.set("Content-Type","application/json");const r=await fetch(url(p),{...o,headers:h,signal:o.signal || (o.method ? undefined : AbortSignal.timeout(15000))});const d=await r.json().catch(()=>({}));if(r.status===401 && token && token===S.token && document.body.classList.contains("signed-in")) endSession();if(!r.ok)throw Object.assign(Error(d.detail||"Ошибка "+r.status),{status:r.status});return d}
 function note(t){const x=$("#toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2800)}
-function page(p){["catalog","settings","detail","categories"].forEach(x=>$("#"+x)?.classList.toggle("hidden",x!==p));$("#heading").textContent=({catalog:"Каталог деталей",settings:"Подключение",detail:"Карточка детали",categories:"Категории"})[p];document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x.dataset.page===p))}
-function auth(first,msg){$("#logout").classList.add("hidden");$("#auth").classList.remove("hidden");$("#catalog").classList.add("hidden");["settings","detail","categories"].forEach(x=>$("#"+x)?.classList.add("hidden"));$("#name-label").classList.toggle("hidden",!first);$("#org-label").classList.toggle("hidden",!first);$("#auth-form").elements.display_name.required=first;$("#auth-form").elements.organization_name.required=first;$("#auth-form").dataset.first=String(first);$("#auth-title").textContent=first?"Создайте рабочую область":"Вход в QR";$("#auth-note").textContent=msg|| (first?"Создайте администратора и первую организацию.":"Введите email и пароль.");$("#auth-submit").textContent=first?"Создать":"Войти"}
-async function start(){ $("#remote").value=S.api;$("#endpoint").textContent=url("/api");$("#mode").textContent=S.api?"Удалённый сервер":"Локальный сервер";try{if(S.token){await home();return}const s=await req("/api/setup-status");auth(s.setup_required)}catch(e){auth(false,"Сервер недоступен: "+e.message)}}
-async function home(){const m=await req("/api/me");$("#org").textContent=m.organizations[0]?.name||"Организация";$("#auth").classList.add("hidden");$("#logout").classList.remove("hidden");await loadCategories();const id=location.pathname.match(/^\/parts\/([^/]+)/)?.[1];if(id){page("detail");await showDetail(id)}else{page("catalog");await load()}}
+function page(p){if(!document.body.classList.contains("signed-in"))return;$("#boot").classList.add("hidden");["catalog","settings","detail","categories","members"].forEach(x=>$("#"+x)?.classList.toggle("hidden",x!==p));$("#heading").textContent=({catalog:"Каталог деталей",settings:"Подключение",detail:"Карточка детали",categories:"Категории",members:"Пользователи и проекты"})[p];document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x.dataset.page===p))}
+function auth(first,msg){
+ document.body.classList.remove("signed-in","choosing-server");
+ $("#heading").textContent=first?"Создание рабочей области":"Вход в QR";
+ const form=$("#auth-form");
+ form.reset();
+ form.elements.password.autocomplete=first?"new-password":"current-password";
+ form.elements.password_confirmation.disabled=!first;
+ form.elements.password_confirmation.required=first;
+ $("#confirm-label").classList.toggle("hidden",!first);
+ $("#project-picker").classList.add("hidden");
+ $('[data-page="members"]').classList.add("hidden");
+ $("#org").textContent="Рабочая область";
+ $("#member-rows").replaceChildren();
+ $("#create-user").reset();$("#boot").classList.add("hidden");$("#logout").classList.add("hidden");$("#auth").classList.remove("hidden");$("#catalog").classList.add("hidden");["settings","detail","categories","members"].forEach(x=>$("#"+x)?.classList.add("hidden"));$("#name-label").classList.toggle("hidden",!first);$("#org-label").classList.toggle("hidden",!first);$("#auth-form").elements.display_name.required=first;$("#auth-form").elements.organization_name.required=first;$("#auth-form").dataset.first=String(first);$("#auth-title").textContent=first?"Создайте рабочую область":"Вход в QR";$("#auth-note").textContent=msg|| (first?"Создайте администратора и первую организацию.":"Введите email и пароль.");$("#auth-submit").textContent=first?"Создать":"Войти"}
+async function start(){
+ $("#remote").value=S.api;
+ $("#endpoint").textContent=url("/api");
+ $("#mode").textContent=S.api?"Удалённый сервер":"Локальный сервер";
+ try {
+  if(S.token){
+   try { await home(); return; }
+   catch(error){
+    if(error.status!==401)throw error;
+    S.token="";
+    saveSetting("sessionStorage","qr_token","");
+   }
+  }
+  const status=await req("/api/setup-status");
+  auth(status.setup_required);
+ } catch(error){
+  auth(false,"Не удалось открыть каталог. Проверьте подключение к серверу. "+error.message);
+ }
+}
+async function home(){let m=await req("/api/me");
+ const linked=new URLSearchParams(location.search).get("project");
+ if(location.pathname.startsWith("/parts/") && linked && linked!==m.active_project_id){
+  await selectProject(linked);
+  m=await req("/api/me");
+ }
+ const active=m.organizations.find(project=>project.id===m.active_project_id);
+ document.body.classList.remove("choosing-server");
+ document.body.classList.add("signed-in");
+ S.project=active.id;
+ $("#org").textContent=m.user.display_name;
+ $("#project-select").replaceChildren(...m.organizations.map(project=>new Option(project.name,project.id,false,project.id===active.id)));
+ $("#project-picker").classList.remove("hidden");
+ $('[data-page="members"]').classList.toggle("hidden",active.role!=="admin");
+ $("#auth").classList.add("hidden");$("#logout").classList.remove("hidden");await loadCategories();const id=location.pathname.match(/^\/parts\/([^/]+)/)?.[1];if(id){page("detail");await showDetail(id)}else{page("catalog");await load()}}
 async function loadCategories(){S.categories=await req("/api/categories");const options=S.categories.map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join("");const sel=$("#part-category");if(sel)sel.innerHTML='<option value="">Без категории</option>'+options;const detail=$("#detail-category");if(detail){const current=detail.value;detail.innerHTML='<option value="">Без категории</option>'+options;detail.value=current}const filter=$("#category-filter");if(filter){const current=filter.value;filter.innerHTML='<option value="">Все категории</option>'+options;filter.value=current}}
 
 function esc(v){return String(v||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 async function load(){const q=encodeURIComponent($("#search").value),k=encodeURIComponent($("#filter").value),category=$("#category-filter").value;S.items=await req("/api/parts?q="+q+"&kind="+k);if(category)S.items=S.items.filter(p=>p.category_id===category);const cats=Object.fromEntries(S.categories.map(c=>[c.id,c.name]));$("#rows").innerHTML=S.items.map(p=>"<tr><td><b>"+esc(p.part_code)+"</b></td><td>"+esc(p.title)+"<small>"+esc(p.description)+"</small></td><td>"+(p.kind==="assembly"?"Сборка":"Деталь")+"</td><td>"+esc(cats[p.category_id]||"—")+"</td><td>"+esc(p.material||"—")+"</td><td>R"+p.revision+"</td><td><button data-id='"+p.id+"' class='open'>Открыть</button></td></tr>").join("")||'<tr><td colspan="7" class="empty">Записей пока нет. Создайте первую деталь или сборку.</td></tr>';$("#total").textContent=S.items.length;$("#parts").textContent=S.items.filter(x=>x.kind==="part").length;$("#assemblies").textContent=S.items.filter(x=>x.kind==="assembly").length;$("#count").textContent=S.items.length+" записей"}
-$("#auth-form").onsubmit=async e=>{e.preventDefault();const first=e.currentTarget.dataset.first==="true",data=Object.fromEntries(new FormData(e.currentTarget));try{const r=await req(first?"/api/setup":"/api/login",{method:"POST",body:JSON.stringify(data)});S.token=r.token;sessionStorage.setItem("qr_token",r.token);await home()}catch(x){note(x.message)}};
+function passwordsMatch(form){
+ const confirm=form.elements.password_confirmation;
+ if(confirm.value===form.elements.password.value)return true;
+ confirm.setCustomValidity("Пароли не совпадают. Повторите пароль.");
+ confirm.reportValidity();
+ confirm.setCustomValidity("");
+ return false;
+}
+$("#auth-server").onclick=()=>{
+ document.body.classList.add("choosing-server");
+ $("#settings").classList.remove("hidden");
+ $("#remote").focus();
+};
+$("#auth-form").onsubmit=async e=>{e.preventDefault();const first=e.currentTarget.dataset.first==="true",data=Object.fromEntries(new FormData(e.currentTarget));if(first && !passwordsMatch(e.currentTarget))return;delete data.password_confirmation;try{const r=await req(first?"/api/setup":"/api/login",{method:"POST",body:JSON.stringify(data)});S.token=r.token;saveSetting("sessionStorage","qr_token",r.token);await home()}catch(x){note(x.message)}};
 $("#new").onclick=()=>$("#modal").classList.remove("hidden");$("#close").onclick=()=>$("#modal").classList.add("hidden");
-$("#part-form").onsubmit=async e=>{e.preventDefault();try{const data=Object.fromEntries(new FormData(e.currentTarget));await req("/api/parts",{method:"POST",body:JSON.stringify(data)});$("#modal").classList.add("hidden");e.currentTarget.reset();await load();note("Карточка создана")}catch(x){note(x.message)}};
+$("#part-form").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget;try{const data=Object.fromEntries(new FormData(form));data.category_id=data.category_id||null;await req("/api/parts",{method:"POST",body:JSON.stringify(data)});$("#modal").classList.add("hidden");form.reset();await load();note("Карточка создана")}catch(x){note(x.message)}};
 $("#rows").onclick=e=>{const id=e.target.dataset.id;if(id)location.href="/parts/"+id};
 let timer;$("#search").oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>load().catch(x=>note(x.message)),250)};$("#filter").onchange=()=>load().catch(x=>note(x.message));$("#category-filter").onchange=()=>load().catch(x=>note(x.message));
-$("#logout").onclick=()=>{S.token="";sessionStorage.removeItem("qr_token");auth(false)};
-$("#connect").onclick=()=>{const v=$("#remote").value.trim().replace(/\/+$/,"");if(!/^https?:\/\//i.test(v))return note("Введите полный URL сервера");S.api=v;localStorage.setItem("qr_api",v);S.token="";sessionStorage.removeItem("qr_token");start()};
-$("#local").onclick=()=>{localStorage.removeItem("qr_api");sessionStorage.removeItem("qr_token");location.href="/"};
-document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{page(b.dataset.page);if(b.dataset.page==="catalog")load().catch(x=>note(x.message));if(b.dataset.page==="categories")loadCategories().then(renderCategories).catch(x=>note(x.message))});
+function endSession(){
+ document.body.classList.remove("signed-in","choosing-server");
+ S.token="";
+ saveSetting("sessionStorage","qr_token","");
+ location.replace("/");
+}
+$("#logout").onclick=endSession;
+window.addEventListener("pagehide",()=>document.body.classList.remove("signed-in"));
+window.addEventListener("pageshow",event=>{if(event.persisted)location.reload();});
+$("#connect").onclick=()=>{const v=$("#remote").value.trim().replace(/\/+$/,"");if(!/^https?:\/\//i.test(v))return note("Введите полный URL сервера");document.body.classList.remove("signed-in");S.api=v;saveSetting("localStorage","qr_api",v);S.token="";saveSetting("sessionStorage","qr_token","");start()};
+$("#local").onclick=()=>{saveSetting("localStorage","qr_api","");saveSetting("sessionStorage","qr_token","");location.href="/"};
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(!document.body.classList.contains("signed-in"))return;page(b.dataset.page);if(b.dataset.page==="catalog")load().catch(x=>note(x.message));if(b.dataset.page==="members")refreshMembers().catch(x=>note(x.message));if(b.dataset.page==="categories")loadCategories().then(renderCategories).catch(x=>note(x.message))});
 $("#category-create").onclick=async()=>{const name=$("#category-name").value.trim();if(!name)return note("Введите название категории");try{await req("/api/categories",{method:"POST",body:JSON.stringify({name})});$("#category-name").value="";await loadCategories();renderCategories();note("Категория создана")}catch(e){note(e.message)}};
 function renderCategories(){$("#category-rows").innerHTML=S.categories.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+c.part_count+'</td><td><button data-rename="'+c.id+'">Переименовать</button> <button data-delete="'+c.id+'">Удалить</button></td></tr>').join("")||'<tr><td colspan="3">Категорий пока нет</td></tr>'}
 $("#category-rows").onclick=async e=>{try{if(e.target.dataset.delete){if(!confirm("Удалить категорию? Детали сохранятся без категории."))return;await req("/api/categories/"+e.target.dataset.delete,{method:"DELETE"})}if(e.target.dataset.rename){const c=S.categories.find(x=>x.id===e.target.dataset.rename),name=prompt("Новое название категории",c.name);if(name===null)return;await req("/api/categories/"+c.id,{method:"PATCH",body:JSON.stringify({name})})}await loadCategories();renderCategories();await load()}catch(x){note(x.message)}};
@@ -27,7 +106,7 @@ $("#detail-category").onchange=async e=>{const id=location.pathname.split("/").p
 $("#share-copy").onclick=()=>{navigator.clipboard.writeText($("#share-link").value).then(()=>note("Ссылка скопирована")).catch(()=>note("Не удалось скопировать ссылку"))};
 $("#detail-back").onclick=()=>location.href="/";
 $("#models-list").onclick=async e=>{try{const previewId=e.target.dataset.modelPreview;if(previewId){const id=location.pathname.split("/").pop(),models=await req("/api/parts/"+id+"/models"),model=models.find(x=>x.id===previewId);if(model)await load3d(model);return}const mid=e.target.dataset.modelDownload;if(!mid)return;const r=await fetch(url("/api/models/"+mid+"/download"),{headers:{Authorization:"Bearer "+S.token}});if(!r.ok)throw Error("Не удалось скачать модель");const blob=await r.blob(),a=document.createElement("a"),u=URL.createObjectURL(blob);a.href=u;a.download=e.target.dataset.filename||"model";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}catch(x){note(x.message)}};
-$("#model-upload").onsubmit=async e=>{e.preventDefault();const id=location.pathname.split("/").pop();try{await req("/api/parts/"+id+"/models",{method:"POST",body:new FormData(e.currentTarget)});e.currentTarget.reset();await showDetail(id);note("3D-модель загружена")}catch(x){note(x.message)}};
+$("#model-upload").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,id=location.pathname.split("/").pop();try{await req("/api/parts/"+id+"/models",{method:"POST",body:new FormData(form)});form.reset();await showDetail(id);note("3D-модель загружена")}catch(x){note(x.message)}};
 function renderAssembly(items,isAssembly){
  const panel=$("#assembly-panel");
  if(!panel)return;
@@ -79,7 +158,7 @@ $("#component-detail").onclick=async e=>{
   else if(preview){const models=await req("/api/parts/"+encodeURIComponent(S.selectedComponentId)+"/models"),m=models.find(x=>x.id===preview);if(m)await load3d(m)}
  }catch(x){note(x.message)}
 };
-async function showDetail(id){const d=await req("/api/parts/"+id),p=d.part;renderAssembly(d.bom,p.kind==="assembly");$("#detail-title").textContent=p.title;$("#detail-code").textContent=p.part_code;$("#detail-meta").innerHTML="<div>Тип<b>"+(p.kind==="assembly"?"Сборка":"Деталь")+"</b></div><div>Материал<b>"+esc(p.material||"—")+"</b></div><div>Масса<b>"+esc(p.mass||"—")+"</b></div><div>Габариты<b>"+esc(p.dimensions||"—")+"</b></div><div>Ревизия<b>R"+p.revision+"</b></div>";$("#detail-description").textContent=p.description||"Описание не заполнено";const share=await req("/api/parts/"+id+"/share");$("#share-link").value=new URL(share.url,localShareBase()).href;$("#detail-category").innerHTML='<option value="">Без категории</option>'+S.categories.map(c=>'<option value="'+esc(c.id)+'" '+(c.id===p.category_id?"selected":"")+'>'+esc(c.name)+'</option>').join("");$("#documents").innerHTML=d.documents.map(x=>"<li>"+esc(x.original_filename)+"</li>").join("")||"<li>Файлов пока нет</li>";const models=await req("/api/parts/"+id+"/models");$("#models-list").innerHTML=models.map(m=>'<li>'+esc(m.original_filename)+' ('+m.file_format+') — '+(["STL","OBJ","STEP","STP"].includes(m.file_format)?'<button type="button" data-model-preview="'+m.id+'">просмотр</button> ':"")+'<button type="button" data-model-download="'+m.id+'" data-filename="'+esc(m.original_filename)+'">скачать</button></li>').join("")||"<li>3D-модели не добавлены</li>";const preview=models.find(m=>["STL","OBJ"].includes(m.file_format));if(preview){$("#viewer-fit").disabled=false;await load3d(preview)}else{$("#viewer-fit").disabled=true;$("#viewer-note").textContent=models.length?"STEP/STP сохранён. Для просмотра необходима CAD-конвертация; исходный файл можно скачать.":"Загрузите STL или OBJ для интерактивного просмотра."}}
+async function showDetail(id){const d=await req("/api/parts/"+id),p=d.part;renderAssembly(d.bom,p.kind==="assembly");$("#detail-title").textContent=p.title;$("#detail-code").textContent=p.part_code;$("#detail-meta").innerHTML="<div>Тип<b>"+(p.kind==="assembly"?"Сборка":"Деталь")+"</b></div><div>Материал<b>"+esc(p.material||"—")+"</b></div><div>Масса<b>"+esc(p.mass||"—")+"</b></div><div>Габариты<b>"+esc(p.dimensions||"—")+"</b></div><div>Ревизия<b>R"+p.revision+"</b></div>";$("#detail-description").textContent=p.description||"Описание не заполнено";const share=await req("/api/parts/"+id+"/share");$("#share-link").value=new URL(share.url+"?project="+encodeURIComponent(S.project),localShareBase()).href;$("#detail-category").innerHTML='<option value="">Без категории</option>'+S.categories.map(c=>'<option value="'+esc(c.id)+'" '+(c.id===p.category_id?"selected":"")+'>'+esc(c.name)+'</option>').join("");$("#documents").innerHTML=d.documents.map(x=>"<li>"+esc(x.original_filename)+"</li>").join("")||"<li>Файлов пока нет</li>";const models=await req("/api/parts/"+id+"/models");$("#models-list").innerHTML=models.map(m=>'<li>'+esc(m.original_filename)+' ('+m.file_format+') — '+(["STL","OBJ","STEP","STP"].includes(m.file_format)?'<button type="button" data-model-preview="'+m.id+'">просмотр</button> ':"")+'<button type="button" data-model-download="'+m.id+'" data-filename="'+esc(m.original_filename)+'">скачать</button></li>').join("")||"<li>3D-модели не добавлены</li>";const preview=models.find(m=>["STL","OBJ"].includes(m.file_format));if(preview){$("#viewer-fit").disabled=false;await load3d(preview)}else{$("#viewer-fit").disabled=true;$("#viewer-note").textContent=models.length?"STEP/STP сохранён. Для просмотра необходима CAD-конвертация; исходный файл можно скачать.":"Загрузите STL или OBJ для интерактивного просмотра."}}
 async function load3d(m){
  const noteEl=$("#viewer-note"),canvas=$("#model-view");$("#viewer-fit").disabled=true;$("#model-dimensions").textContent="";
  try{
@@ -148,4 +227,57 @@ async function load3d(m){
   const draw=()=>{if(S.viewer!==state)return;renderer.render(scene,camera);state.frame=requestAnimationFrame(draw)};draw();
  }catch(error){noteEl.textContent=error.message;note(error.message)}
 }
+async function selectProject(id){
+ const result=await req("/api/projects/"+encodeURIComponent(id)+"/select",{method:"POST"});
+ S.token=result.token;
+ saveSetting("sessionStorage","qr_token",S.token);
+}
+
+async function openProject(id){
+ await selectProject(id);
+ history.replaceState(null,"","/");
+ if(readSetting("sessionStorage","qr_token")===S.token){ location.reload(); return; }
+ $("#search").value="";
+ $("#filter").value="";
+ $("#category-filter").value="";
+ await home();
+}
+
+$("#project-select").onchange=async event=>{
+ const picker=event.currentTarget;
+ picker.disabled=true;
+ try { await openProject(picker.value); }
+ catch(error){ picker.value=S.project; note(error.message); }
+ finally { picker.disabled=false; }
+};
+
+async function refreshMembers(){
+ const users=await req("/api/project/users");
+ $("#member-rows").replaceChildren(...users.map(user=>{
+  const row=document.createElement("tr");
+  for(const value of [user.display_name,user.email,user.role==="admin"?"Администратор":"Участник"]){
+   row.insertCell().textContent=value;
+  }
+  return row;
+ }));
+}
+
+for(const [selector,path] of [["#create-user","/api/project/users"],["#add-member","/api/project/members"],["#create-project","/api/projects"]]){
+ $(selector).onsubmit=async event=>{
+  event.preventDefault();
+  const form=event.currentTarget, button=form.querySelector("button");
+  if(selector==="#create-user" && !passwordsMatch(form))return;
+  const data=Object.fromEntries(new FormData(form));
+  delete data.password_confirmation;
+  button.disabled=true;
+  try {
+   const result=await req(path,{method:"POST",body:JSON.stringify(data)});
+   form.reset();
+   if(selector==="#create-project") await openProject(result.id);
+   else { await refreshMembers(); note("Пользователь добавлен в проект"); }
+  } catch(error){ note(error.message); }
+  finally { button.disabled=false; }
+ };
+}
 start();
+})();
