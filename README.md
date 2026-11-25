@@ -12,7 +12,7 @@ Current application features:
 - Document upload/download API.
 - 3D model upload for STL, OBJ, STEP and STP (up to 250 MB per model).
 - Interactive browser preview for STL and OBJ with orbit, pan, zoom and fit-to-view. STL/OBJ unit metadata may be missing; the viewer is not a certified measuring tool. Three.js and its loaders are bundled locally, so preview works without internet access.
-- STEP/STP files are stored and downloadable. Native browser tessellation is not yet included; this remains a CAD-viewer integration task.
+- STEP/STP files can be uploaded, downloaded and previewed through the bundled OpenCascade WebAssembly importer. The first Windows launch attempts to download the pinned 7.6 MB WASM runtime and verifies its Git blob SHA-1; QR still starts if the download is unavailable.
 - Windows launchers automatically select a free port starting at 8765.
 
 ## Run on Windows
@@ -34,6 +34,6 @@ Keep the terminal window open. Runtime database and uploaded files are stored in
 ## Important limitations
 
 - SQLite is currently not encrypted. Do not store confidential production drawings in this prototype.
-- STEP/STP preview is not yet implemented. STL/OBJ preview uses bundled Three.js and works offline.
+- STL/OBJ preview uses bundled Three.js and works offline. STEP/STP preview works after the pinned OpenCascade WASM runtime is installed; the original CAD file remains unchanged.
 - STEP/STP upload and download are supported, but native STEP tessellation/preview is not implemented. A server-side OpenCascade conversion service is a planned next step.
 - PostgreSQL adapter, SQLCipher/DPAPI, encrypted file vault, sync, licensing, QR image generation, backups/restore and production deployment hardening remain future work.

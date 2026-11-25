@@ -141,6 +141,7 @@ def test_detail_deep_link_and_bundled_viewer_assets():
     assert page.status_code == 200
     assert 'id="model-view"' in page.text
     assert "/vendor/three/three.min.js" in page.text
+    assert "/vendor/occt/occt-import-js.js" in page.text
     assert "cdn.jsdelivr.net" not in page.text
     assert client.get("/vendor/three/three.min.js").status_code == 200
     assert client.get("/vendor/three/STLLoader.js").status_code == 200

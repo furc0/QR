@@ -28,7 +28,7 @@ API:
 - `POST /api/parts/{id}/models` multipart field `file`
 - `GET /api/models/{model_id}/download`
 
-STL and OBJ are previewed in the detail page with locally bundled Three.js and loaders; no CDN access is required. The viewer supports orbit rotation, pan, zoom and fit-to-view. STEP/STP are retained as original CAD files and can be downloaded; native B-rep tessellation is not yet implemented. A future OpenCascade integration should tessellate STEP to GLB/glTF while preserving source STEP, units and metadata.
+STL and OBJ are previewed in the detail page with locally bundled Three.js and loaders; no CDN access is required. The viewer supports orbit rotation, pan, zoom and fit-to-view. STEP/STP are retained as original CAD files and can be downloaded. The browser uses the OpenCascade WebAssembly importer to tessellate STEP locally into Three.js meshes; the output linear unit is requested as millimetres and the source file remains unchanged.
 
 ## Current limitations and next engineering tasks
 
@@ -46,3 +46,10 @@ STL and OBJ are previewed in the detail page with locally bundled Three.js and l
 - Uploads are streamed to a temporary file, capped at 250 MiB, hashed with SHA-256, and atomically moved into the model vault before the database record is committed. Failed writes remove the temporary/orphaned file.
 - Model downloads are organization-authenticated and preserve the original filename. No public unauthenticated file URL is generated.
 - STEP/STP upload is supported, but browser tessellation is not yet available. The source file remains downloadable; no approximate/fake mesh is displayed in its place.
+
+
+### STEP/STP runtime
+
+The OpenCascade importer JavaScript wrapper and LGPL-2.1 license are bundled under `web/vendor/occt`. The 7.6 MiB WASM binary is installed by `install_step_runtime.py` on the first Windows launch when internet access is available. The downloader pins an immutable upstream commit, checks the exact expected size and verifies the Git blob SHA-1 before atomically installing the file. A failed download does not prevent QR from starting; STL/OBJ remain available. To retry manually, run `py install_step_runtime.py`.
+
+STEP triangulation runs in the browser. Output is requested in millimetres with a bounding-box-relative linear deflection of 0.001 and angular deflection of 0.5 radians. Large STEP assemblies may take time and memory. Confirm the model's units and dimensions in the source CAD system before using them for engineering decisions.
