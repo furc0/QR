@@ -249,7 +249,8 @@ CREATE TABLE licenses (
   valid_until timestamptz,
   license_reference text NOT NULL UNIQUE,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (id, organization_id)
 );
 CREATE TABLE license_entitlements (
   id uuid PRIMARY KEY,
@@ -283,7 +284,7 @@ CREATE TABLE device_installations (
 );
 CREATE TABLE license_leases (
   id uuid PRIMARY KEY,
-  license_id uuid NOT NULL REFERENCES licenses(id),
+  license_id uuid NOT NULL,
   organization_id uuid NOT NULL REFERENCES organizations(id),
   installation_id uuid,
   issued_at timestamptz NOT NULL,
@@ -298,6 +299,7 @@ CREATE TABLE license_leases (
   revoked_at timestamptz,
   CHECK (not_before <= expires_at),
   CHECK (offline_until <= expires_at),
+  FOREIGN KEY (license_id, organization_id) REFERENCES licenses(id, organization_id),
   FOREIGN KEY (installation_id, organization_id) REFERENCES device_installations(id, organization_id)
 );
 CREATE INDEX license_leases_license_idx ON license_leases(license_id, status, offline_until);
@@ -366,7 +368,7 @@ DO $$
 DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
-    'memberships','roles','parts','part_revisions','categories','part_categories',
+    'memberships','roles','membership_roles','parts','part_revisions','categories','part_categories',
     'tags','part_tags','bom_items','part_relations','documents','document_versions',
     'part_documents','qr_routes','licenses','device_installations','license_leases',
     'sync_operations','sync_cursors','sync_conflicts'
