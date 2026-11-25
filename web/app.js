@@ -60,9 +60,14 @@ async function load3d(m){
     const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
     const normals=part.attributes?.normal?.array;if(normals?.length===positions.length)geometry.setAttribute("normal",new THREE.Float32BufferAttribute(normals,3));
     let indices=part.index?.array;if(indices?.length){if(Array.isArray(indices[0]))indices=indices.flat();geometry.setIndex(indices)}
-    if(!normals)geometry.computeVertexNormals();
-    const color=Array.isArray(part.color)&&part.color.length>=3?new THREE.Color(part.color[0],part.color[1],part.color[2]):new THREE.Color(0x91bdb5);
-    const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color,metalness:.22,roughness:.48,side:THREE.DoubleSide}));
+    if(!normals||normals.length!==positions.length)geometry.computeVertexNormals();
+    const fallback=Array.isArray(part.color)&&part.color.length>=3?part.color:[0.57,0.74,0.71];
+    const faces=Array.isArray(part.brep_faces)?part.brep_faces:[];
+    const materials=[],materialByColor=new Map();
+    const materialFor=colorValues=>{const values=Array.isArray(colorValues)&&colorValues.length>=3?colorValues:fallback,key=values.map(v=>Number(v).toFixed(5)).join(",");if(!materialByColor.has(key)){materialByColor.set(key,materials.length);materials.push(new THREE.MeshStandardMaterial({color:new THREE.Color(values[0],values[1],values[2]),metalness:.22,roughness:.48,side:THREE.DoubleSide}))}return materialByColor.get(key)};
+    if(indices?.length&&faces.length){for(const face of faces){const first=Math.max(0,Number(face.first)||0),last=Math.max(first,Number(face.last)||first);geometry.addGroup(first*3,(last-first+1)*3,materialFor(face.color))}}
+    if(!materials.length)materials.push(new THREE.MeshStandardMaterial({color:new THREE.Color(fallback[0],fallback[1],fallback[2]),metalness:.22,roughness:.48,side:THREE.DoubleSide}));
+    const mesh=new THREE.Mesh(geometry,materials.length===1?materials[0]:materials);
     mesh.name=part.name||"STEP body";object.add(mesh);
    }
    if(!object.children.length)throw Error("STEP-файл прочитан, но триангуляция не содержит отображаемых тел.");

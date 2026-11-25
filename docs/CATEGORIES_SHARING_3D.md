@@ -28,7 +28,7 @@ API:
 - `POST /api/parts/{id}/models` multipart field `file`
 - `GET /api/models/{model_id}/download`
 
-STL and OBJ are previewed in the detail page with locally bundled Three.js and loaders; no CDN access is required. The viewer supports orbit rotation, pan, zoom and fit-to-view. STEP/STP are retained as original CAD files and can be downloaded. The browser uses the OpenCascade WebAssembly importer to tessellate STEP locally into Three.js meshes; the output linear unit is requested as millimetres and the source file remains unchanged.
+STL and OBJ are previewed in the detail page with locally bundled Three.js and loaders; no CDN access is required. The viewer supports orbit rotation, pan, zoom and fit-to-view. STEP/STP are retained as original CAD files and can be downloaded. The browser uses the OpenCascade WebAssembly importer to tessellate STEP locally into Three.js meshes; per-face CAD colors are retained when provided by the importer, output linear units are requested as millimetres, and the source file remains unchanged.
 
 ## Current limitations and next engineering tasks
 

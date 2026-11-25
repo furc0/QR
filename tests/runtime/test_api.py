@@ -145,3 +145,4 @@ def test_detail_deep_link_and_bundled_viewer_assets():
     assert "cdn.jsdelivr.net" not in page.text
     assert client.get("/vendor/three/three.min.js").status_code == 200
     assert client.get("/vendor/three/STLLoader.js").status_code == 200
+    assert client.get("/vendor/occt/occt-import-js.js").status_code == 200
