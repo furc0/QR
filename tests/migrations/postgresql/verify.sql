@@ -26,7 +26,7 @@ INSERT INTO part_revisions(id,organization_id,part_id,revision_number,snapshot_j
  ('40000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000003',1,'{}','00000000-0000-0000-0000-000000000001');
 
 -- Same code in different tenants is allowed; same code within one tenant is not.
-DO $$
+DO $body$
 BEGIN
   BEGIN
     INSERT INTO parts(id,organization_id,part_code,title,created_by)
@@ -34,7 +34,7 @@ BEGIN
     RAISE EXCEPTION 'expected tenant-local part_code uniqueness violation';
   EXCEPTION WHEN unique_violation THEN NULL;
   END;
-END $$;
+END $body$;
 
 -- Correct component revision accepted.
 INSERT INTO bom_items(id,organization_id,assembly_part_id,component_part_id,component_revision_id,quantity,unit_code)
@@ -43,7 +43,7 @@ VALUES ('50000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-00000000
         '40000000-0000-0000-0000-000000000001',1,'pcs');
 
 -- Cross-tenant BOM link must fail.
-DO $$
+DO $body$
 BEGIN
   BEGIN
     INSERT INTO bom_items(id,organization_id,assembly_part_id,component_part_id,quantity,unit_code)
@@ -52,10 +52,10 @@ BEGIN
     RAISE EXCEPTION 'expected cross-tenant foreign key violation';
   EXCEPTION WHEN foreign_key_violation THEN NULL;
   END;
-END $$;
+END $body$;
 
 -- A revision belonging to another component must fail.
-DO $$
+DO $body$
 BEGIN
   BEGIN
     INSERT INTO bom_items(id,organization_id,assembly_part_id,component_part_id,component_revision_id,quantity,unit_code)
@@ -65,7 +65,7 @@ BEGIN
     RAISE EXCEPTION 'expected component revision ownership violation';
   EXCEPTION WHEN foreign_key_violation THEN NULL;
   END;
-END $$;
+END $body$;
 
 -- Create one valid nested edge, then verify that the reverse edge is rejected.
 INSERT INTO bom_items(id,organization_id,assembly_part_id,component_part_id,quantity,unit_code)
@@ -73,7 +73,7 @@ VALUES ('50000000-0000-0000-0000-000000000005','10000000-0000-0000-0000-00000000
         '30000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002',1,'pcs');
 
 -- A nested assembly cycle must fail.
-DO $
+DO $body$
 BEGIN
   BEGIN
     INSERT INTO bom_items(id,organization_id,assembly_part_id,component_part_id,quantity,unit_code)
@@ -82,7 +82,7 @@ BEGIN
     RAISE EXCEPTION 'expected assembly cycle violation';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
-END $$;
+END $body$;
 
 -- Revision and document history rows cannot be rewritten in place.
 INSERT INTO documents(id,organization_id,original_filename,created_by)
@@ -91,33 +91,33 @@ INSERT INTO document_versions(id,organization_id,document_id,version_number,stor
 VALUES ('70000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001',
         '60000000-0000-0000-0000-000000000001',1,'opaque/test','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,
         '00000000-0000-0000-0000-000000000001');
-DO $
+DO $body$
 BEGIN
   BEGIN
     UPDATE document_versions SET size_bytes = 2 WHERE id = '70000000-0000-0000-0000-000000000001';
     RAISE EXCEPTION 'expected immutable document version violation';
   EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
   END;
-END $;
+END $body$;
 
 -- Runtime role can discover only its own memberships before choosing a tenant.
 SET ROLE qr_runtime;
 SET app.current_user_id = '00000000-0000-0000-0000-000000000001';
-DO $$
+DO $body$
 DECLARE n integer;
 BEGIN
   SELECT count(*) INTO n FROM memberships;
   IF n <> 2 THEN RAISE EXCEPTION 'membership self-discovery expected 2 rows, got %', n; END IF;
-END $$;
+END $body$;
 
 -- Once a tenant is selected, catalog rows are isolated.
 SET app.current_organization_id = '10000000-0000-0000-0000-000000000001';
-DO $$
+DO $body$
 DECLARE n integer;
 BEGIN
   SELECT count(*) INTO n FROM parts;
   IF n <> 3 THEN RAISE EXCEPTION 'tenant RLS expected 3 parts, got %', n; END IF;
-END $$;
+END $body$;
 RESET ROLE;
 
 SELECT 'PostgreSQL migration integration checks passed' AS result;
