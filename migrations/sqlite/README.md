@@ -15,3 +15,6 @@ Before every schema upgrade:
 6. Keep the previous backup until the new version has been used successfully.
 
 SQLite does not provide PostgreSQL RLS. Enforce tenant context in the repository layer and use composite foreign keys; enable `PRAGMA foreign_keys=ON` on every connection.
+
+
+The local migration also installs SQLite triggers that require a non-deleted assembly as the BOM parent and reject direct or nested assembly cycles. Composite foreign keys ensure that a BOM revision belongs to the selected component and that a document-version link belongs to the same organization. The local database remains an offline projection; the server repeats all authorization and integrity checks during synchronization.
