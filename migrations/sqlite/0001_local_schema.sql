@@ -29,7 +29,10 @@ CREATE TABLE local_parts (
   local_updated_at TEXT NOT NULL,
   deleted_at TEXT,
   UNIQUE(organization_id, part_code),
-  UNIQUE(id, organization_id)
+  UNIQUE(id, organization_id),
+  FOREIGN KEY(current_revision_id, organization_id, id)
+    REFERENCES local_part_revisions(id, organization_id, part_id)
+    DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX local_parts_catalog_idx ON local_parts(organization_id, status, title);
 
@@ -43,6 +46,7 @@ CREATE TABLE local_part_revisions (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL,
   UNIQUE(part_id, revision_number),
+  UNIQUE(id, organization_id, part_id),
   FOREIGN KEY(part_id, organization_id) REFERENCES local_parts(id, organization_id)
 );
 
@@ -61,7 +65,9 @@ CREATE TABLE local_bom_items (
   local_updated_at TEXT NOT NULL,
   deleted_at TEXT,
   FOREIGN KEY(assembly_part_id, organization_id) REFERENCES local_parts(id, organization_id),
-  FOREIGN KEY(component_part_id, organization_id) REFERENCES local_parts(id, organization_id)
+  FOREIGN KEY(component_part_id, organization_id) REFERENCES local_parts(id, organization_id),
+  FOREIGN KEY(component_revision_id, organization_id, component_part_id)
+    REFERENCES local_part_revisions(id, organization_id, part_id)
 );
 CREATE INDEX local_bom_order_idx ON local_bom_items(organization_id, assembly_part_id, position_no);
 
@@ -86,6 +92,7 @@ CREATE TABLE local_document_versions (
   scan_status TEXT NOT NULL,
   created_at TEXT NOT NULL,
   UNIQUE(document_id, version_number),
+  UNIQUE(id, organization_id),
   FOREIGN KEY(document_id, organization_id) REFERENCES local_documents(id, organization_id)
 );
 
