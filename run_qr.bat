@@ -8,6 +8,7 @@ call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 if errorlevel 1 (echo Dependency installation failed & pause & exit /b 1)
+set "PYTHONPATH=%CD%\server"
 python -m qr_server.launcher
 if errorlevel 1 (echo QR server stopped with an error.)
 pause
