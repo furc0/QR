@@ -9,10 +9,10 @@ The first implementation slice includes first-run administrator and organization
 1. Install Python 3.11 or newer.
 2. Clone/download this repository.
 3. Double-click `run_qr.bat`, or run `./run_qr.ps1` in PowerShell.
-4. Open http://127.0.0.1:8765.
+4. Open the address printed in the terminal (normally http://127.0.0.1:8765).
 5. On first launch, create the administrator and organization.
 
-Keep the terminal window open. Runtime database and uploaded files are stored in the untracked `data/` directory.
+The launcher checks ports starting at 8765 and automatically selects the next available port if the preferred port is occupied. You can set `QR_PORT` before launch to choose a different starting port. Keep the terminal window open. Runtime database and uploaded files are stored in the untracked `data/` directory.
 
 ## Server placement
 

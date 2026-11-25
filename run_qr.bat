@@ -8,7 +8,6 @@ call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 if errorlevel 1 (echo Dependency installation failed & pause & exit /b 1)
-echo QR is starting at http://127.0.0.1:8765
-echo Keep this window open. Runtime data is stored in the data folder.
-python -m uvicorn qr_server.main:app --app-dir server --host 127.0.0.1 --port 8765
+python -m qr_server.launcher
+if errorlevel 1 (echo QR server stopped with an error.)
 pause

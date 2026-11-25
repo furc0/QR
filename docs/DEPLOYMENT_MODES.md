@@ -2,11 +2,11 @@
 
 ## A — This PC is the server (default)
 
-The Windows PC runs the API, database and file vault. The default bind address is 127.0.0.1:8765, so it is local-only and works without internet. LAN access is a separate operator action requiring a deliberate bind to 0.0.0.0 and Windows Firewall rules.
+The Windows PC runs the API, database and file vault. The launcher binds to 127.0.0.1 and starts at port 8765, automatically selecting the next available port when that port is occupied. Set the `QR_PORT` environment variable to choose another starting port. The server remains local-only and works without internet. LAN access is a separate operator action requiring a deliberate bind to 0.0.0.0 and Windows Firewall rules.
 
 ## B — Remote host
 
-Install the QR API on another computer or VPS. Give it a stable HTTPS origin, configure QR_CORS_ORIGINS to allow the UI origin, and enter the API origin in QR → Подключение. The remote host becomes the data server; the PC is a client.
+Install the same QR API on another computer or VPS. Give it a stable HTTPS origin, configure QR_CORS_ORIGINS to allow the UI origin, and enter the API origin in QR → Подключение. The remote host becomes the data server; the PC is a client.
 
 ## Production target
 
