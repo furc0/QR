@@ -31,6 +31,17 @@ For the initial organization chooser, the trusted API sets `SET LOCAL app.curren
 
 Additional RLS policies scope role-permission mappings through tenant roles, license entitlements through tenant licenses, and audit rows to the selected tenant. Platform-wide audit rows require a separate owner-only service context. Global control-plane tables such as owner feature policies remain restricted by database grants and service authorization.
 
+For race-safe BOM edits, the API must acquire the same transaction-scoped advisory lock in a separate SQL command **before** reading or modifying the BOM graph:
+
+```sql
+BEGIN;
+SELECT pg_advisory_xact_lock(hashtextextended('<validated-organization-uuid>'::text, 0));
+-- Read/validate/update BOM only after the lock has been acquired.
+COMMIT;
+```
+
+The lock must be acquired before the DML statement so that its statement snapshot includes any preceding committed BOM change. Retry the complete transaction on serialization/deadlock errors. The trigger repeats validation as a final database guard; it does not replace this service-level lock ordering.
+
 The migration also enforces:
 - current part revision belongs to the same part and organization;
 - BOM component revision belongs to the exact component and organization;
