@@ -74,7 +74,7 @@ CREATE TABLE membership_roles (
 CREATE TABLE parts (
   id uuid PRIMARY KEY,
   organization_id uuid NOT NULL REFERENCES organizations(id),
-  part_code text NOT NULL,
+  part_code text NOT NULL CHECK (length(btrim(part_code)) > 0),
   title text NOT NULL,
   description text,
   kind text NOT NULL DEFAULT 'part' CHECK (kind IN ('part','assembly')),
@@ -363,6 +363,77 @@ CREATE TABLE audit_events (
 );
 CREATE INDEX audit_events_org_time_idx ON audit_events(organization_id, created_at DESC);
 CREATE INDEX audit_events_target_idx ON audit_events(target_type, target_id, created_at DESC);
+
+
+-- Immutable engineering/document history and append-only audit trail.
+CREATE FUNCTION reject_immutable_row_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $
+BEGIN
+  RAISE EXCEPTION '% rows are immutable; create a new version instead', TG_TABLE_NAME
+    USING ERRCODE = '55000';
+END;
+$;
+CREATE TRIGGER part_revisions_immutable
+  BEFORE UPDATE OR DELETE ON part_revisions
+  FOR EACH ROW EXECUTE FUNCTION reject_immutable_row_mutation();
+CREATE TRIGGER document_versions_immutable
+  BEFORE UPDATE OR DELETE ON document_versions
+  FOR EACH ROW EXECUTE FUNCTION reject_immutable_row_mutation();
+CREATE TRIGGER audit_events_immutable
+  BEFORE UPDATE OR DELETE ON audit_events
+  FOR EACH ROW EXECUTE FUNCTION reject_immutable_row_mutation();
+
+-- Enforce assembly type and prevent nested-assembly cycles at the database boundary.
+CREATE FUNCTION validate_bom_item() RETURNS trigger
+LANGUAGE plpgsql AS $
+DECLARE
+  parent_kind text;
+  creates_cycle boolean;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended(NEW.organization_id::text, 0));
+
+  SELECT kind INTO parent_kind
+  FROM parts
+  WHERE id = NEW.assembly_part_id
+    AND organization_id = NEW.organization_id
+    AND deleted_at IS NULL;
+
+  IF parent_kind IS DISTINCT FROM 'assembly' THEN
+    RAISE EXCEPTION 'BOM parent % must be an active assembly', NEW.assembly_part_id
+      USING ERRCODE = '23514';
+  END IF;
+
+  WITH RECURSIVE descendants(part_id) AS (
+    SELECT b.component_part_id
+    FROM bom_items b
+    WHERE b.organization_id = NEW.organization_id
+      AND b.assembly_part_id = NEW.component_part_id
+      AND b.deleted_at IS NULL
+      AND (TG_OP <> 'UPDATE' OR b.id <> NEW.id)
+    UNION
+    SELECT b.component_part_id
+    FROM bom_items b
+    JOIN descendants d ON b.assembly_part_id = d.part_id
+    WHERE b.organization_id = NEW.organization_id
+      AND b.deleted_at IS NULL
+      AND (TG_OP <> 'UPDATE' OR b.id <> NEW.id)
+  )
+  SELECT EXISTS (
+    SELECT 1 FROM descendants WHERE part_id = NEW.assembly_part_id
+  ) INTO creates_cycle;
+
+  IF creates_cycle THEN
+    RAISE EXCEPTION 'BOM change would create an assembly cycle'
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$;
+CREATE TRIGGER bom_items_validate
+  BEFORE INSERT OR UPDATE OF assembly_part_id, component_part_id, organization_id, deleted_at
+  ON bom_items
+  FOR EACH ROW EXECUTE FUNCTION validate_bom_item();
 
 -- Tenant RLS. The API must SET LOCAL app.current_organization_id after validating membership.
 DO $$
