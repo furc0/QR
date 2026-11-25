@@ -1,4 +1,5 @@
 from __future__ import annotations
+import mimetypes
 import hashlib, hmac, json, os, secrets, sqlite3, time, uuid, base64
 from contextlib import contextmanager
 from pathlib import Path
@@ -192,7 +193,7 @@ async def upload(pid:str,file:UploadFile=File(...),u=Depends(current_user)):
     did,vid=str(uuid.uuid4()),str(uuid.uuid4()); folder=FILES/oid/pid/did; folder.mkdir(parents=True,exist_ok=True)
     path=folder/"v1.bin"; path.write_bytes(raw); name=Path(file.filename or "document.bin").name[:240]
     with connect() as c:
-        c.execute("INSERT INTO documents VALUES(?,?,?,?)",(did,oid,pid,name,t))
+        c.execute("INSERT INTO documents VALUES(?,?,?,?,?)",(did,oid,pid,name,t))
         c.execute("INSERT INTO document_versions VALUES(?,?,?,?,?,?,?,?)",(vid,did,1,str(path),file.content_type or "application/octet-stream",len(raw),hashlib.sha256(raw).hexdigest(),t))
     return {"document_id":did,"filename":name,"size_bytes":len(raw)}
 @app.get("/api/documents/{did}/download")
@@ -207,4 +208,16 @@ def download(did:str,u=Depends(current_user)):
 from . import features
 
 if WEB.exists():
+    # Windows registry associations can map .js to a non-script MIME type.
+    mimetypes.add_type("text/javascript", ".js")
+    mimetypes.add_type("text/css", ".css")
+    mimetypes.add_type("application/wasm", ".wasm")
+
+    @app.middleware("http")
+    async def revalidate_ui(request, call_next):
+        response = await call_next(request)
+        if request.url.path in ("/", "/index.html", "/app.js", "/style.css") or request.url.path.startswith("/parts/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     app.mount("/", StaticFiles(directory=WEB, html=True), name="web")

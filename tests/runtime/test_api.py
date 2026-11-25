@@ -148,3 +148,14 @@ def test_detail_deep_link_and_bundled_viewer_assets():
     assert client.get("/vendor/three/three.min.js").status_code == 200
     assert client.get("/vendor/three/STLLoader.js").status_code == 200
     assert client.get("/vendor/occt/occt-import-js.js").status_code == 200
+
+
+def test_catalogue_boot_assets():
+    for path in ("/", "/parts/example"):
+        page = client.get(path)
+        assert 'id="boot"' in page.text
+        assert page.headers["cache-control"] == "no-cache"
+    script = client.get("/app.js?v=2")
+    assert script.status_code == 200
+    assert "javascript" in script.headers["content-type"]
+    assert script.headers["cache-control"] == "no-cache"
