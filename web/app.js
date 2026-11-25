@@ -32,6 +32,11 @@ async function load3d(m){
  const noteEl=$("#viewer-note"),canvas=$("#model-view");$("#viewer-fit").disabled=true;$("#model-dimensions").textContent="";
  try{
   if(!window.THREE)throw Error("Локальная 3D-библиотека не загружена.");
+  if(m.file_format==="STEP"||m.file_format==="STP"){
+   if(typeof window.occtimportjs!=="function")throw Error("Не загружен модуль OpenCascade. Проверьте файлы web/vendor/occt и повторите запуск.");
+   const runtime=await fetch("/vendor/occt/occt-import-js.wasm",{method:"HEAD"});
+   if(!runtime.ok)throw Error("STEP-просмотр не установлен. Подключите интернет и запустите install_step_runtime.py.");
+  }
   if(S.viewer){cancelAnimationFrame(S.viewer.frame);S.viewer.resizeObserver?.disconnect();S.viewer.scene.traverse(o=>{o.geometry?.dispose();if(Array.isArray(o.material))o.material.forEach(x=>x.dispose());else o.material?.dispose()});S.viewer.renderer.dispose();S.viewer.renderer.forceContextLoss();S.viewer=null}
   const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(canvas.clientWidth,canvas.clientHeight,false);
@@ -47,9 +52,6 @@ async function load3d(m){
   else if(m.file_format==="OBJ"){object=new THREE.OBJLoader().parse(new TextDecoder().decode(buffer));object.traverse(node=>{if(node.isMesh){node.material=new THREE.MeshStandardMaterial({color:0x91bdb5,metalness:.2,roughness:.48,side:THREE.DoubleSide});node.geometry.computeVertexNormals()}})}
   else if(m.file_format==="STEP"||m.file_format==="STP"){
    noteEl.textContent="STEP: загружаю OpenCascade и строю триангуляцию. Для крупных моделей это может занять некоторое время…";
-   if(typeof window.occtimportjs!=="function")throw Error("Не загружен модуль OpenCascade. Проверьте файлы web/vendor/occt и повторите запуск.");
-   const runtime=await fetch("/vendor/occt/occt-import-js.wasm",{method:"HEAD"});
-   if(!runtime.ok)throw Error("STEP-просмотр не установлен. Подключите интернет и запустите install_step_runtime.py.");
    S.occtPromise=S.occtPromise||window.occtimportjs({locateFile:path=>"/vendor/occt/"+path});
    const occt=await S.occtPromise;
    const cad=occt.ReadStepFile(new Uint8Array(buffer),{linearUnit:"millimeter",linearDeflectionType:"bounding_box_ratio",linearDeflection:.001,angularDeflection:.5});
