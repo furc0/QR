@@ -71,6 +71,80 @@ CREATE TABLE local_bom_items (
 );
 CREATE INDEX local_bom_order_idx ON local_bom_items(organization_id, assembly_part_id, position_no);
 
+-- Keep offline BOM data structurally valid before synchronization.
+CREATE TRIGGER local_bom_validate_insert
+BEFORE INSERT ON local_bom_items
+BEGIN
+  SELECT CASE
+    WHEN COALESCE((SELECT kind FROM local_parts
+                   WHERE id = NEW.assembly_part_id
+                     AND organization_id = NEW.organization_id
+                     AND deleted_at IS NULL), '') <> 'assembly'
+    THEN RAISE(ABORT, 'BOM parent must be a non-deleted assembly')
+  END;
+  SELECT CASE
+    WHEN NEW.assembly_part_id = NEW.component_part_id
+    THEN RAISE(ABORT, 'assembly cannot contain itself')
+  END;
+  SELECT CASE
+    WHEN EXISTS (
+      WITH RECURSIVE descendants(part_id) AS (
+        SELECT component_part_id
+        FROM local_bom_items
+        WHERE organization_id = NEW.organization_id
+          AND assembly_part_id = NEW.component_part_id
+          AND deleted_at IS NULL
+        UNION
+        SELECT b.component_part_id
+        FROM local_bom_items b
+        JOIN descendants d ON b.assembly_part_id = d.part_id
+        WHERE b.organization_id = NEW.organization_id
+          AND b.deleted_at IS NULL
+      )
+      SELECT 1 FROM descendants WHERE part_id = NEW.assembly_part_id
+    )
+    THEN RAISE(ABORT, 'BOM change would create an assembly cycle')
+  END;
+END;
+
+CREATE TRIGGER local_bom_validate_update
+BEFORE UPDATE OF assembly_part_id, component_part_id, organization_id, deleted_at ON local_bom_items
+BEGIN
+  SELECT CASE
+    WHEN COALESCE((SELECT kind FROM local_parts
+                   WHERE id = NEW.assembly_part_id
+                     AND organization_id = NEW.organization_id
+                     AND deleted_at IS NULL), '') <> 'assembly'
+    THEN RAISE(ABORT, 'BOM parent must be a non-deleted assembly')
+  END;
+  SELECT CASE
+    WHEN NEW.assembly_part_id = NEW.component_part_id
+    THEN RAISE(ABORT, 'assembly cannot contain itself')
+  END;
+  SELECT CASE
+    WHEN EXISTS (
+      WITH RECURSIVE descendants(part_id) AS (
+        SELECT component_part_id
+        FROM local_bom_items
+        WHERE organization_id = NEW.organization_id
+          AND assembly_part_id = NEW.component_part_id
+          AND deleted_at IS NULL
+          AND id <> OLD.id
+        UNION
+        SELECT b.component_part_id
+        FROM local_bom_items b
+        JOIN descendants d ON b.assembly_part_id = d.part_id
+        WHERE b.organization_id = NEW.organization_id
+          AND b.deleted_at IS NULL
+          AND b.id <> OLD.id
+      )
+      SELECT 1 FROM descendants WHERE part_id = NEW.assembly_part_id
+    )
+    THEN RAISE(ABORT, 'BOM change would create an assembly cycle')
+  END;
+END;
+
+
 CREATE TABLE local_documents (
   id TEXT PRIMARY KEY,
   organization_id TEXT NOT NULL,
