@@ -11,7 +11,7 @@ Current application features:
 - Permanent detail page URLs: `/parts/{part_id}`. The page requires a valid organization login; a URL is a locator, not an access token.
 - Document upload/download API.
 - 3D model upload for STL, OBJ, STEP and STP (up to 250 MB per model).
-- Interactive browser preview for STL and OBJ with orbit, pan, zoom and fit-to-view. Three.js and its loaders are bundled locally, so preview works without internet access.
+- Interactive browser preview for STL and OBJ with orbit, pan, zoom and fit-to-view. STL/OBJ unit metadata may be missing; the viewer is not a certified measuring tool. Three.js and its loaders are bundled locally, so preview works without internet access.
 - STEP/STP files are stored and downloadable. Native browser tessellation is not yet included; this remains a CAD-viewer integration task.
 - Windows launchers automatically select a free port starting at 8765.
 

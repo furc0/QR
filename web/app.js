@@ -64,7 +64,7 @@ async function load3d(m){
   const resize=()=>{const w=canvas.clientWidth,h=Math.max(canvas.clientHeight,1);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()};
   const resizeObserver=new ResizeObserver(resize);resizeObserver.observe(canvas);
   const state={renderer,scene,resizeObserver,frame:0};S.viewer=state;
-  $("#viewer-fit").disabled=false;noteEl.textContent="ЛКМ — вращение · ПКМ/средняя кнопка — перемещение · Колесо — масштаб · Вписать — показать модель целиком";
+  $("#viewer-fit").disabled=false;noteEl.textContent="ЛКМ — вращение · ПКМ/средняя кнопка — перемещение · Колесо — масштаб · Вписать — показать модель целиком. STL/OBJ могут не содержать единиц измерения: проверяйте масштаб по КД.";
   const draw=()=>{if(S.viewer!==state)return;renderer.render(scene,camera);state.frame=requestAnimationFrame(draw)};draw();
  }catch(error){noteEl.textContent=error.message;note(error.message)}
 }

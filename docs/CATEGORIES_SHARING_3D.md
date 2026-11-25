@@ -37,3 +37,12 @@ STL and OBJ are previewed in the detail page with locally bundled Three.js and l
 3. Add viewer controls for pan, fit-to-view, axes, wireframe, section planes and model versions.
 4. Add per-organization roles and granular permissions for category/model administration.
 5. Add upload streaming, antivirus/content validation and storage quotas before production use.
+
+
+## Engineering accuracy and file handling
+
+- The uploaded source model is kept unchanged; the viewer is a visualization aid, not a geometry editor or a certified measurement tool.
+- STL does not define physical units. OBJ files may also lack reliable unit metadata. Do not infer millimetres from the viewer scale; verify units and dimensions against the source CAD system and drawing.
+- Uploads are streamed to a temporary file, capped at 250 MiB, hashed with SHA-256, and atomically moved into the model vault before the database record is committed. Failed writes remove the temporary/orphaned file.
+- Model downloads are organization-authenticated and preserve the original filename. No public unauthenticated file URL is generated.
+- STEP/STP upload is supported, but browser tessellation is not yet available. The source file remains downloadable; no approximate/fake mesh is displayed in its place.
