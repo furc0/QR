@@ -17,13 +17,19 @@ Current application features:
 
 ## Run on Windows
 
-1. Install Python 3.11 or newer.
+1. Install Python 3.11 or newer, including the Windows Python Launcher (`py`).
 2. Clone/download this repository.
 3. Double-click `run_qr.bat`, or run `./run_qr.ps1` in PowerShell.
 4. Open the exact address printed in the terminal.
 5. On first launch, create the administrator and organization.
 
 Keep the terminal window open. Runtime database and uploaded files are stored in the untracked `data/` directory.
+
+### Moving QR to another computer
+
+Do not copy the `.venv/` directory from one computer to another. Python virtual environments contain machine-specific paths to the base Python installation and are not portable. If a copied `.venv` is detected, the Windows launchers test it and recreate only that directory when its interpreter cannot start. Dependencies are then installed on the destination computer.
+
+The launcher does not remove or recreate `data/`; the SQLite database and uploaded files remain untouched. Python 3.11 or newer must be installed on each computer.
 
 ## Local-only detail links
 
