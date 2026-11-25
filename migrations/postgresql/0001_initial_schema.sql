@@ -367,12 +367,12 @@ CREATE INDEX audit_events_target_idx ON audit_events(target_type, target_id, cre
 
 -- Immutable engineering/document history and append-only audit trail.
 CREATE FUNCTION reject_immutable_row_mutation() RETURNS trigger
-LANGUAGE plpgsql AS $
+LANGUAGE plpgsql AS $body$
 BEGIN
   RAISE EXCEPTION '% rows are immutable; create a new version instead', TG_TABLE_NAME
     USING ERRCODE = '55000';
 END;
-$;
+$body$;
 CREATE TRIGGER part_revisions_immutable
   BEFORE UPDATE OR DELETE ON part_revisions
   FOR EACH ROW EXECUTE FUNCTION reject_immutable_row_mutation();
@@ -385,7 +385,7 @@ CREATE TRIGGER audit_events_immutable
 
 -- Enforce assembly type and prevent nested-assembly cycles at the database boundary.
 CREATE FUNCTION validate_bom_item() RETURNS trigger
-LANGUAGE plpgsql AS $
+LANGUAGE plpgsql AS $body$
 DECLARE
   parent_kind text;
   creates_cycle boolean;
@@ -429,7 +429,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$;
+$body$;
 CREATE TRIGGER bom_items_validate
   BEFORE INSERT OR UPDATE OF assembly_part_id, component_part_id, organization_id, deleted_at
   ON bom_items
