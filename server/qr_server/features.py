@@ -163,7 +163,7 @@ async def upload_model(part_id: str, file: UploadFile = File(...), u=Depends(cur
         raise
     finally:
         await file.close()
-    return {"id":mid,"filename":name,"format":ext[1:].upper(),"size_bytes":len(raw)}
+    return {"id":mid,"filename":name,"format":ext[1:].upper(),"size_bytes":size_bytes}
 
 @router.get("/api/models/{model_id}/download")
 def download_model(model_id: str, u=Depends(current_user)):

@@ -85,6 +85,7 @@ def test_categories_share_links_and_3d_model_upload():
     model = client.post("/api/parts/" + part_id + "/models", headers=auth(),
                         files={"file": ("sample.stl", b"solid test\\nendsolid test", "model/stl")})
     assert model.status_code == 200, model.text
+    assert model.json()["size_bytes"] == len(b"solid test\\nendsolid test")
     model_id = model.json()["id"]
     listing = client.get("/api/parts/" + part_id + "/models", headers=auth())
     assert listing.status_code == 200
