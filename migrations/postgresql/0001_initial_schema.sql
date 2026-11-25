@@ -436,7 +436,7 @@ CREATE TRIGGER bom_items_validate
   FOR EACH ROW EXECUTE FUNCTION validate_bom_item();
 
 -- Tenant RLS. The API must SET LOCAL app.current_organization_id after validating membership.
-DO $$
+DO $body$
 DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
@@ -452,7 +452,7 @@ BEGIN
       t
     );
   END LOOP;
-END $;
+END $body$;
 
 -- Membership discovery is restricted to the authenticated user set by the trusted API.
 -- Tenant writes still require an active tenant context. The API must never accept this GUC
