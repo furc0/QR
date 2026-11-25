@@ -89,7 +89,9 @@ async function start(){
 async function home(){let m=await req("/api/me");
  const code=location.pathname.match(/^\/s\/([A-Za-z0-9_-]+)\/?$/)?.[1];
  const number=location.pathname.match(/^\/n\/([0-9]{1,18})\/?$/)?.[1];
- const target=number?await req("/api/mobile/resolve/"+number):code?await req("/api/shared/"+encodeURIComponent(code)):null;
+ let target=null,lookupError="";
+ try {target=number?await req("/api/mobile/resolve/"+number):code?await req("/api/shared/"+encodeURIComponent(code)):null}
+ catch(error){if(error.status!==404)throw error;lookupError=error.message;history.replaceState(null,"","/")}
  S.detailId=target?.part_id||location.pathname.match(/^\/parts\/([^/]+)/)?.[1];
  const linked=target?.project_id||new URLSearchParams(location.search).get("project");
  if(S.detailId && linked && linked!==m.active_project_id){
@@ -104,7 +106,7 @@ async function home(){let m=await req("/api/me");
  $("#project-select").replaceChildren(...m.organizations.map(project=>new Option(project.name,project.id,false,project.id===active.id)));
  $("#project-picker").classList.remove("hidden");
  $('[data-page="members"]').classList.toggle("hidden",active.role!=="admin");
- $("#auth").classList.add("hidden");$("#logout").classList.remove("hidden");await loadCategories();const id=S.detailId;if(id){page("detail");await showDetail(id)}else{page("catalog");await load()}}
+ $("#auth").classList.add("hidden");$("#logout").classList.remove("hidden");await loadCategories();const id=S.detailId;if(id){page("detail");await showDetail(id)}else{page("catalog");await load()}if(lookupError)note(lookupError);updatePresence()}
 async function loadCategories(){S.categories=await req("/api/categories");const options=S.categories.map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join("");const sel=$("#part-category");if(sel)sel.innerHTML='<option value="">Без категории</option>'+options;const detail=$("#detail-category");if(detail){const current=detail.value;detail.innerHTML='<option value="">Без категории</option>'+options;detail.value=current}const filter=$("#category-filter");if(filter){const current=filter.value;filter.innerHTML='<option value="">Все категории</option>'+options;filter.value=current}}
 
 function esc(v){return String(v||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -326,5 +328,19 @@ for(const [selector,path] of [["#create-user","/api/project/users"],["#add-membe
   finally { button.disabled=false; }
  };
 }
+let presenceBusy=false;
+async function updatePresence(){
+ if(presenceBusy||!S.token||!document.body.classList.contains("signed-in"))return;
+ presenceBusy=true;
+ try{
+  if(navigator.userAgent.includes("QRMobile/")&&!document.hidden){
+   let device=readSetting("localStorage","qr_mobile_device");
+   if(!device){const b=crypto.getRandomValues(new Uint8Array(16));b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;const hex=Array.from(b,n=>n.toString(16).padStart(2,"0")).join("");device=hex.slice(0,8)+"-"+hex.slice(8,12)+"-"+hex.slice(12,16)+"-"+hex.slice(16,20)+"-"+hex.slice(20);saveSetting("localStorage","qr_mobile_device",device)}
+   await req("/api/mobile/heartbeat",{method:"POST",body:JSON.stringify({device})});
+  }
+  const p=await req("/api/mobile/presence");$("#mobile-presence").textContent="Телефоны в проекте: "+p.connected_devices;
+ }catch(e){$("#mobile-presence").textContent="Связь не подтверждена"}finally{presenceBusy=false}
+}
+setInterval(updatePresence,15000);
 start();
 })();

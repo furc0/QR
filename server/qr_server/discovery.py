@@ -3,9 +3,45 @@ import json
 import socket
 import threading
 import time
+import ipaddress
+import os
+import subprocess
 
 PORT = 8764
 PROBE = b"QR_DISCOVER_V1"
+
+
+def network_targets():
+    """Windows hotspot owner is usually the PC's IPv4 default gateway."""
+    targets = {"255.255.255.255"}
+    if os.name != "nt":
+        return targets
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        raw = subprocess.check_output(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+             "$a=@(Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,PrefixLength);"
+             "$g=@(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | Select-Object -ExpandProperty NextHop);"
+             "@{addresses=$a;gateways=$g}|ConvertTo-Json -Compress"],
+            timeout=6, creationflags=flags, stderr=subprocess.DEVNULL).decode("utf-8-sig")
+        data = json.loads(raw)
+        for entry in data.get("addresses") or []:
+            try:
+                ip = ipaddress.ip_interface(f'{entry["IPAddress"]}/{entry["PrefixLength"]}')
+                if ip.ip.is_private and not ip.ip.is_loopback and not ip.ip.is_link_local and ip.network.prefixlen < 31:
+                    targets.add(str(ip.network.broadcast_address))
+            except (KeyError, ValueError):
+                continue
+        for address in data.get("gateways") or []:
+            try:
+                ip = ipaddress.ip_address(address)
+                if ip.is_private and not ip.is_unspecified and not ip.is_loopback:
+                    targets.add(str(ip))
+            except ValueError:
+                continue
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    return targets
 
 
 def serve_discovery(stop: threading.Event, catalogue_id: str, port: int):
@@ -16,12 +52,18 @@ def serve_discovery(stop: threading.Event, catalogue_id: str, port: int):
             sock.bind(("", PORT))
             sock.settimeout(0.5)
             next_beacon = 0.0
+            next_refresh = 0.0
+            targets = {"255.255.255.255"}
             while not stop.is_set():
+                if time.monotonic() >= next_refresh:
+                    targets = network_targets()
+                    next_refresh = time.monotonic() + 15
                 if time.monotonic() >= next_beacon:
-                    try:
-                        sock.sendto(payload, ("255.255.255.255", PORT))
-                    except OSError:
-                        pass
+                    for target in targets:
+                        try:
+                            sock.sendto(payload, (target, PORT))
+                        except OSError:
+                            pass
                     next_beacon = time.monotonic() + 3
                 try:
                     data, peer = sock.recvfrom(256)

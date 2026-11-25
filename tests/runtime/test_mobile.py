@@ -37,3 +37,8 @@ def test_mobile_number_and_permissions():
     with connect() as c:
         c.execute("DELETE FROM memberships WHERE user_id=? AND organization_id=?",(uid,oid))
     assert client.get("/api/mobile/resolve/"+n,headers=h).status_code in (401,403,404)
+
+
+def test_presence_requires_login():
+    assert client.get("/api/mobile/presence").status_code == 401
+    assert client.post("/api/mobile/heartbeat",json={"device":str(uuid.uuid4())}).status_code == 401

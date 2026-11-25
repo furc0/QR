@@ -33,7 +33,7 @@ public class MainActivity extends AppCompatActivity {
     private WebView web;
     private LinearLayout root;
     private String origin="", pinned="", pending="/";
-    private boolean busy=false, online=false, active=false, destroyed=false;
+    private boolean busy=false, online=false, active=false, destroyed=false, choosing=false, confirming=false;
     private int epoch=0;
     private Download pendingDownload;
     private ValueCallback<Uri[]> fileCallback;
@@ -49,7 +49,7 @@ public class MainActivity extends AppCompatActivity {
     });
     private final Runnable poll=new Runnable(){@Override public void run(){
         if(!active||destroyed)return;
-        if(!busy)reconnect(false);
+        if(!busy&&!choosing)reconnect(false);
         handler.postDelayed(this,12000);
     }};
 
@@ -94,7 +94,11 @@ public class MainActivity extends AppCompatActivity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setUserAgentString(s.getUserAgentString()+" QRMobile/1");
         s.setCacheMode(WebSettings.LOAD_NO_CACHE);s.setJavaScriptCanOpenWindowsAutomatically(false);
         web.setWebViewClient(new WebViewClient(){
-            @Override public boolean shouldOverrideUrlLoading(WebView w,WebResourceRequest r){return !sameOrigin(r.getUrl());}
+            @Override public boolean shouldOverrideUrlLoading(WebView w,WebResourceRequest r){
+                if(!sameOrigin(r.getUrl())||!online)return true;
+                if(r.isForMainFrame()){String p=r.getUrl().getPath();if("/".equals(p)||p.matches("/(parts|n|s)/[A-Za-z0-9_-]+"))pending=p;}
+                return false;
+            }
             @Override public WebResourceResponse shouldInterceptRequest(WebView w,WebResourceRequest r){
                 String scheme=r.getUrl().getScheme();
                 if(("http".equals(scheme)||"https".equals(scheme))&&!sameOrigin(r.getUrl()))
@@ -102,7 +106,7 @@ public class MainActivity extends AppCompatActivity {
                 return null;
             }
             @Override public void onReceivedError(WebView w,WebResourceRequest r,WebResourceError e){
-                if(r.isForMainFrame()){online=false;showStatus("Связь с ПК потеряна: "+e.getDescription(),false);}
+                if(r.isForMainFrame()&&sameOrigin(r.getUrl())){online=false;showStatus("Связь с ПК потеряна: "+e.getDescription(),false);}
             }
             @Override public void onReceivedSslError(WebView w,SslErrorHandler h,android.net.http.SslError e){h.cancel();online=false;showStatus("Ошибка сертификата HTTPS",false);}
         });
@@ -140,7 +144,7 @@ public class MainActivity extends AppCompatActivity {
         else{showStatus("Поиск сервера для открытия карточки…",false);reconnect(true);}
     }
     private void reconnect(boolean force){
-        if(busy||destroyed)return;
+        if(busy||destroyed||choosing)return;
         busy=true;final int ticket=epoch;
         final String previous=origin, expected=pinned;
         if(force||!online)showStatus("Поиск сервера QR…",false);
@@ -166,6 +170,7 @@ public class MainActivity extends AppCompatActivity {
                 for(Discovery.Server x:candidates)if(!expected.isEmpty()&&expected.equals(x.id)){accept(x);return;}
                 online=false;
                 showStatus("Нет связи с сохранённым ПК. Проверьте сеть и брандмауэр.",false);
+                web.stopLoading();web.loadUrl("about:blank");
                 if(!candidates.isEmpty()&&(force||expected.isEmpty()))pick(candidates);
                 else if(force)toast("Сервер не обнаружен. Укажите IP:порт в разделе «Сервер».");
             });
@@ -173,17 +178,21 @@ public class MainActivity extends AppCompatActivity {
     }
     private void pick(List<Discovery.Server> servers){
         String[] names=new String[servers.size()];for(int i=0;i<names.length;i++)names[i]=servers.get(i).toString();
-        new AlertDialog.Builder(this).setTitle("Выберите свой компьютер").setItems(names,(d,i)->confirm(servers.get(i))).setNegativeButton("Отмена",null).show();
+        choosing=true;
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Выберите свой компьютер").setItems(names,(d,i)->{choosing=false;confirm(servers.get(i));}).setNegativeButton("Отмена",null).create();
+        dialog.setOnDismissListener(d->{if(!confirming)choosing=false;});dialog.show();
     }
     private void confirm(Discovery.Server s){
         String message=s.origin+"\nID базы: "+s.id+"\nСверьте ID с окном QR на ПК.";
         if(s.origin.startsWith("http://"))message+="\nHTTP не шифруется. Используйте только доверенную локальную сеть.";
         if(!pinned.isEmpty()&&!pinned.equals(s.id))message+="\nВНИМАНИЕ: другая база. Те же номера могут обозначать другие детали.";
-        new AlertDialog.Builder(this).setTitle("Подтвердить сервер").setMessage(message).setPositiveButton("Подключить",(d,w)->{
+        choosing=true;confirming=true;
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Подтвердить сервер").setMessage(message).setPositiveButton("Подключить",(d,w)->{
             epoch++;busy=false;online=false;pinned=s.id;origin=s.origin;
             prefs.edit().putString("catalogue",pinned).putString("origin",origin).apply();
             makeWeb();accept(s);
-        }).setNegativeButton("Отмена",null).show();
+        }).setNegativeButton("Отмена",null).create();
+        dialog.setOnDismissListener(d->{confirming=false;choosing=false;});dialog.show();
     }
     private void accept(Discovery.Server s){
         boolean change=!s.origin.equals(origin), reload=!online||change;

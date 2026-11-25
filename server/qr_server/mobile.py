@@ -1,6 +1,9 @@
 """Mobile catalogue locators. Numbers are permanent within a catalogue."""
 import io
 import uuid
+import threading
+import time
+from pydantic import BaseModel, Field
 from fastapi import Depends, HTTPException
 from fastapi.responses import FileResponse, Response
 from .main import app, connect, current_user, org_for, WEB
@@ -86,3 +89,36 @@ def label(part_id: str, kind: str, extension: str, u=Depends(current_user)):
 @app.get("/n/{number}")
 def number_page(number: str):
     return FileResponse(WEB / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+# Presence is ephemeral; no device or IP history is persisted.
+_presence = {}
+_presence_lock = threading.Lock()
+class Heartbeat(BaseModel):
+    device: str = Field(min_length=36, max_length=36)
+
+def prune_presence(now):
+    for key, at in list(_presence.items()):
+        if now - at > 45:
+            del _presence[key]
+
+@app.post("/api/mobile/heartbeat")
+def heartbeat(data: Heartbeat, u=Depends(current_user)):
+    try:
+        device = str(uuid.UUID(data.device))
+    except ValueError:
+        raise HTTPException(400, "Неверный ID устройства")
+    now = time.monotonic()
+    with _presence_lock:
+        prune_presence(now)
+        key = (org_for(u), u["id"], device)
+        if key not in _presence and len(_presence) >= 2000:
+            raise HTTPException(429, "Слишком много клиентов")
+        _presence[key] = now
+    return {"status": "ok"}
+
+@app.get("/api/mobile/presence")
+def presence(u=Depends(current_user)):
+    with _presence_lock:
+        prune_presence(time.monotonic())
+        return {"connected_devices": sum(1 for key in _presence if key[0] == org_for(u))}

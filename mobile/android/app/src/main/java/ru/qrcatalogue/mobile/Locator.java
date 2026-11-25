@@ -41,7 +41,7 @@ final class Locator {
                 throw new IllegalArgumentException("HTTP разрешён только для локальной сети/VPN");
             if(port<0)port=8765;
         }
-        if ((scheme.equals("https") && port==443) || (scheme.equals("http") && port==80)) port=-1;
+        if (scheme.equals("https") && port==443) port=-1;
         return new URI(scheme,null,host,port,null,null,null).toString();
     }
 }
