@@ -36,3 +36,7 @@
 #project-select{width:100%;margin-top:5px}
 #members form{display:grid;gap:10px;max-width:420px}
 #members .panel{margin-bottom:16px}
+
+body:not(.signed-in) nav,
+body:not(.signed-in) :is(#catalog,#detail,#categories,#members,#modal,#project-picker,#logout),
+body:not(.signed-in):not(.choosing-server) #settings {display:none!important}

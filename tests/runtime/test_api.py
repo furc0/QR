@@ -159,3 +159,12 @@ def test_catalogue_boot_assets():
     assert script.status_code == 200
     assert "javascript" in script.headers["content-type"]
     assert script.headers["cache-control"] == "no-cache"
+
+
+def test_private_sections_require_authentication_and_are_not_cached():
+    for path in ("/api/me", "/api/parts", "/api/categories", "/api/project/users",
+                 "/api/parts/sample", "/api/parts/sample/models",
+                 "/api/documents/sample/download", "/api/models/sample/download"):
+        response = client.get(path)
+        assert response.status_code == 401, path
+        assert response.headers["cache-control"] == "no-store"

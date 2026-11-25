@@ -14,10 +14,18 @@ function saveSetting(storage, key, value) {
 const $=s=>document.querySelector(s),S={api:readSetting("localStorage","qr_api"),token:readSetting("sessionStorage","qr_token"),items:[],categories:[],viewer:null,assemblyItems:[],selectedComponentId:null};
 const url=p=>(S.api?S.api.replace(/\/+$/,""):"")+p;
 const localShareBase=()=>"http://127.0.0.1"+(location.port?":"+location.port:"")+"/";
-async function req(p,o={}){const h=new Headers(o.headers||{});if(S.token)h.set("Authorization","Bearer "+S.token);if(o.body&&!(o.body instanceof FormData))h.set("Content-Type","application/json");const r=await fetch(url(p),{...o,headers:h,signal:o.signal || (o.method ? undefined : AbortSignal.timeout(15000))});const d=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(d.detail||"Ошибка "+r.status),{status:r.status});return d}
+async function req(p,o={}){const token=S.token;const h=new Headers(o.headers||{});if(S.token)h.set("Authorization","Bearer "+S.token);if(o.body&&!(o.body instanceof FormData))h.set("Content-Type","application/json");const r=await fetch(url(p),{...o,headers:h,signal:o.signal || (o.method ? undefined : AbortSignal.timeout(15000))});const d=await r.json().catch(()=>({}));if(r.status===401 && token && token===S.token && document.body.classList.contains("signed-in")) endSession();if(!r.ok)throw Object.assign(Error(d.detail||"Ошибка "+r.status),{status:r.status});return d}
 function note(t){const x=$("#toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2800)}
-function page(p){$("#boot").classList.add("hidden");["catalog","settings","detail","categories","members"].forEach(x=>$("#"+x)?.classList.toggle("hidden",x!==p));$("#heading").textContent=({catalog:"Каталог деталей",settings:"Подключение",detail:"Карточка детали",categories:"Категории",members:"Пользователи и проекты"})[p];document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x.dataset.page===p))}
+function page(p){if(!document.body.classList.contains("signed-in"))return;$("#boot").classList.add("hidden");["catalog","settings","detail","categories","members"].forEach(x=>$("#"+x)?.classList.toggle("hidden",x!==p));$("#heading").textContent=({catalog:"Каталог деталей",settings:"Подключение",detail:"Карточка детали",categories:"Категории",members:"Пользователи и проекты"})[p];document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x.dataset.page===p))}
 function auth(first,msg){
+ document.body.classList.remove("signed-in","choosing-server");
+ $("#heading").textContent=first?"Создание рабочей области":"Вход в QR";
+ const form=$("#auth-form");
+ form.reset();
+ form.elements.password.autocomplete=first?"new-password":"current-password";
+ form.elements.password_confirmation.disabled=!first;
+ form.elements.password_confirmation.required=first;
+ $("#confirm-label").classList.toggle("hidden",!first);
  $("#project-picker").classList.add("hidden");
  $('[data-page="members"]').classList.add("hidden");
  $("#org").textContent="Рабочая область";
@@ -49,6 +57,8 @@ async function home(){let m=await req("/api/me");
   m=await req("/api/me");
  }
  const active=m.organizations.find(project=>project.id===m.active_project_id);
+ document.body.classList.remove("choosing-server");
+ document.body.classList.add("signed-in");
  S.project=active.id;
  $("#org").textContent=m.user.display_name;
  $("#project-select").replaceChildren(...m.organizations.map(project=>new Option(project.name,project.id,false,project.id===active.id)));
@@ -59,15 +69,36 @@ async function loadCategories(){S.categories=await req("/api/categories");const 
 
 function esc(v){return String(v||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 async function load(){const q=encodeURIComponent($("#search").value),k=encodeURIComponent($("#filter").value),category=$("#category-filter").value;S.items=await req("/api/parts?q="+q+"&kind="+k);if(category)S.items=S.items.filter(p=>p.category_id===category);const cats=Object.fromEntries(S.categories.map(c=>[c.id,c.name]));$("#rows").innerHTML=S.items.map(p=>"<tr><td><b>"+esc(p.part_code)+"</b></td><td>"+esc(p.title)+"<small>"+esc(p.description)+"</small></td><td>"+(p.kind==="assembly"?"Сборка":"Деталь")+"</td><td>"+esc(cats[p.category_id]||"—")+"</td><td>"+esc(p.material||"—")+"</td><td>R"+p.revision+"</td><td><button data-id='"+p.id+"' class='open'>Открыть</button></td></tr>").join("")||'<tr><td colspan="7" class="empty">Записей пока нет. Создайте первую деталь или сборку.</td></tr>';$("#total").textContent=S.items.length;$("#parts").textContent=S.items.filter(x=>x.kind==="part").length;$("#assemblies").textContent=S.items.filter(x=>x.kind==="assembly").length;$("#count").textContent=S.items.length+" записей"}
-$("#auth-form").onsubmit=async e=>{e.preventDefault();const first=e.currentTarget.dataset.first==="true",data=Object.fromEntries(new FormData(e.currentTarget));try{const r=await req(first?"/api/setup":"/api/login",{method:"POST",body:JSON.stringify(data)});S.token=r.token;saveSetting("sessionStorage","qr_token",r.token);await home()}catch(x){note(x.message)}};
+function passwordsMatch(form){
+ const confirm=form.elements.password_confirmation;
+ if(confirm.value===form.elements.password.value)return true;
+ confirm.setCustomValidity("Пароли не совпадают. Повторите пароль.");
+ confirm.reportValidity();
+ confirm.setCustomValidity("");
+ return false;
+}
+$("#auth-server").onclick=()=>{
+ document.body.classList.add("choosing-server");
+ $("#settings").classList.remove("hidden");
+ $("#remote").focus();
+};
+$("#auth-form").onsubmit=async e=>{e.preventDefault();const first=e.currentTarget.dataset.first==="true",data=Object.fromEntries(new FormData(e.currentTarget));if(first && !passwordsMatch(e.currentTarget))return;delete data.password_confirmation;try{const r=await req(first?"/api/setup":"/api/login",{method:"POST",body:JSON.stringify(data)});S.token=r.token;saveSetting("sessionStorage","qr_token",r.token);await home()}catch(x){note(x.message)}};
 $("#new").onclick=()=>$("#modal").classList.remove("hidden");$("#close").onclick=()=>$("#modal").classList.add("hidden");
 $("#part-form").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget;try{const data=Object.fromEntries(new FormData(form));data.category_id=data.category_id||null;await req("/api/parts",{method:"POST",body:JSON.stringify(data)});$("#modal").classList.add("hidden");form.reset();await load();note("Карточка создана")}catch(x){note(x.message)}};
 $("#rows").onclick=e=>{const id=e.target.dataset.id;if(id)location.href="/parts/"+id};
 let timer;$("#search").oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>load().catch(x=>note(x.message)),250)};$("#filter").onchange=()=>load().catch(x=>note(x.message));$("#category-filter").onchange=()=>load().catch(x=>note(x.message));
-$("#logout").onclick=()=>{S.token="";saveSetting("sessionStorage","qr_token","");auth(false)};
-$("#connect").onclick=()=>{const v=$("#remote").value.trim().replace(/\/+$/,"");if(!/^https?:\/\//i.test(v))return note("Введите полный URL сервера");S.api=v;saveSetting("localStorage","qr_api",v);S.token="";saveSetting("sessionStorage","qr_token","");start()};
+function endSession(){
+ document.body.classList.remove("signed-in","choosing-server");
+ S.token="";
+ saveSetting("sessionStorage","qr_token","");
+ location.replace("/");
+}
+$("#logout").onclick=endSession;
+window.addEventListener("pagehide",()=>document.body.classList.remove("signed-in"));
+window.addEventListener("pageshow",event=>{if(event.persisted)location.reload();});
+$("#connect").onclick=()=>{const v=$("#remote").value.trim().replace(/\/+$/,"");if(!/^https?:\/\//i.test(v))return note("Введите полный URL сервера");document.body.classList.remove("signed-in");S.api=v;saveSetting("localStorage","qr_api",v);S.token="";saveSetting("sessionStorage","qr_token","");start()};
 $("#local").onclick=()=>{saveSetting("localStorage","qr_api","");saveSetting("sessionStorage","qr_token","");location.href="/"};
-document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{page(b.dataset.page);if(b.dataset.page==="catalog")load().catch(x=>note(x.message));if(b.dataset.page==="members")refreshMembers().catch(x=>note(x.message));if(b.dataset.page==="categories")loadCategories().then(renderCategories).catch(x=>note(x.message))});
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(!document.body.classList.contains("signed-in"))return;page(b.dataset.page);if(b.dataset.page==="catalog")load().catch(x=>note(x.message));if(b.dataset.page==="members")refreshMembers().catch(x=>note(x.message));if(b.dataset.page==="categories")loadCategories().then(renderCategories).catch(x=>note(x.message))});
 $("#category-create").onclick=async()=>{const name=$("#category-name").value.trim();if(!name)return note("Введите название категории");try{await req("/api/categories",{method:"POST",body:JSON.stringify({name})});$("#category-name").value="";await loadCategories();renderCategories();note("Категория создана")}catch(e){note(e.message)}};
 function renderCategories(){$("#category-rows").innerHTML=S.categories.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+c.part_count+'</td><td><button data-rename="'+c.id+'">Переименовать</button> <button data-delete="'+c.id+'">Удалить</button></td></tr>').join("")||'<tr><td colspan="3">Категорий пока нет</td></tr>'}
 $("#category-rows").onclick=async e=>{try{if(e.target.dataset.delete){if(!confirm("Удалить категорию? Детали сохранятся без категории."))return;await req("/api/categories/"+e.target.dataset.delete,{method:"DELETE"})}if(e.target.dataset.rename){const c=S.categories.find(x=>x.id===e.target.dataset.rename),name=prompt("Новое название категории",c.name);if(name===null)return;await req("/api/categories/"+c.id,{method:"PATCH",body:JSON.stringify({name})})}await loadCategories();renderCategories();await load()}catch(x){note(x.message)}};
@@ -235,9 +266,12 @@ for(const [selector,path] of [["#create-user","/api/project/users"],["#add-membe
  $(selector).onsubmit=async event=>{
   event.preventDefault();
   const form=event.currentTarget, button=form.querySelector("button");
+  if(selector==="#create-user" && !passwordsMatch(form))return;
+  const data=Object.fromEntries(new FormData(form));
+  delete data.password_confirmation;
   button.disabled=true;
   try {
-   const result=await req(path,{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(form)))});
+   const result=await req(path,{method:"POST",body:JSON.stringify(data)});
    form.reset();
    if(selector==="#create-project") await openProject(result.id);
    else { await refreshMembers(); note("Пользователь добавлен в проект"); }

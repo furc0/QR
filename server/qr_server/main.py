@@ -235,6 +235,8 @@ if WEB.exists():
         response = await call_next(request)
         if request.url.path in ("/", "/index.html", "/app.js", "/style.css") or request.url.path.startswith("/parts/"):
             response.headers["Cache-Control"] = "no-cache"
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     app.mount("/", StaticFiles(directory=WEB, html=True), name="web")
