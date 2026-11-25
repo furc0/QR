@@ -28,7 +28,7 @@ API:
 - `POST /api/parts/{id}/models` multipart field `file`
 - `GET /api/models/{model_id}/download`
 
-STL and OBJ are previewed in the detail page with Three.js. The viewer supports orbit rotation by dragging and zoom by mouse wheel. STEP/STP are retained as original CAD files and can be downloaded; converting B-rep geometry to a browser mesh is intentionally not faked. A future OpenCascade-based server worker should tessellate STEP to GLB/glTF while preserving source STEP, units and metadata.
+STL and OBJ are previewed in the detail page with locally bundled Three.js and loaders; no CDN access is required. The viewer supports orbit rotation, pan, zoom and fit-to-view. STEP/STP are retained as original CAD files and can be downloaded; native B-rep tessellation is not yet implemented. A future OpenCascade integration should tessellate STEP to GLB/glTF while preserving source STEP, units and metadata.
 
 ## Current limitations and next engineering tasks
 

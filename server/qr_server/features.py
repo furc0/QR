@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, uuid
+import hashlib, uuid, sqlite3, unicodedata
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
@@ -45,27 +45,37 @@ def list_categories(u=Depends(current_user)):
 
 @router.post("/api/categories")
 def create_category(data: CategoryInput, u=Depends(current_user)):
-    oid, cid, name = org_for(u), str(uuid.uuid4()), data.name.strip()
+    oid, cid = org_for(u), str(uuid.uuid4())
+    name = unicodedata.normalize("NFC", data.name.strip())
     if not name:
         raise HTTPException(400, "Название категории обязательно")
     with connect() as c:
+        existing = c.execute("SELECT name FROM categories WHERE organization_id=?", (oid,)).fetchall()
+        if any(unicodedata.normalize("NFC", row["name"]).casefold() == name.casefold() for row in existing):
+            raise HTTPException(409, "Такая категория уже существует")
         try:
             c.execute("INSERT INTO categories VALUES(?,?,?,?)",(cid,oid,name,stamp()))
-        except Exception as exc:
-            if "UNIQUE" in str(exc):
-                raise HTTPException(409, "Такая категория уже существует")
-            raise
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Такая категория уже существует")
     return {"id":cid,"name":name}
 
 @router.patch("/api/categories/{category_id}")
 def rename_category(category_id: str, data: CategoryInput, u=Depends(current_user)):
-    oid, name = org_for(u), data.name.strip()
+    oid = org_for(u)
+    name = unicodedata.normalize("NFC", data.name.strip())
     if not name:
         raise HTTPException(400, "Название категории обязательно")
     with connect() as c:
-        cur = c.execute("UPDATE categories SET name=? WHERE id=? AND organization_id=?",(name,category_id,oid))
-        if not cur.rowcount:
+        current = c.execute("SELECT id FROM categories WHERE id=? AND organization_id=?", (category_id,oid)).fetchone()
+        if not current:
             raise HTTPException(404, "Категория не найдена")
+        existing = c.execute("SELECT id,name FROM categories WHERE organization_id=? AND id<>?", (oid,category_id)).fetchall()
+        if any(unicodedata.normalize("NFC", row["name"]).casefold() == name.casefold() for row in existing):
+            raise HTTPException(409, "Такая категория уже существует")
+        try:
+            c.execute("UPDATE categories SET name=? WHERE id=? AND organization_id=?",(name,category_id,oid))
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Такая категория уже существует")
     return {"id":category_id,"name":name}
 
 @router.delete("/api/categories/{category_id}")
@@ -132,10 +142,15 @@ async def upload_model(part_id: str, file: UploadFile = File(...), u=Depends(cur
     folder = MODELS / oid / part_id
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / (mid + ext)
-    path.write_bytes(raw)
-    with connect() as c:
-        c.execute("INSERT INTO part_models VALUES(?,?,?,?,?,?,?,?,?)",
-                  (mid,oid,part_id,name,ext[1:].upper(),str(path),len(raw),hashlib.sha256(raw).hexdigest(),stamp()))
+    try:
+        with path.open("xb") as stored:
+            stored.write(raw)
+        with connect() as c:
+            c.execute("INSERT INTO part_models VALUES(?,?,?,?,?,?,?,?,?)",
+                      (mid,oid,part_id,name,ext[1:].upper(),str(path),len(raw),hashlib.sha256(raw).hexdigest(),stamp()))
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
     return {"id":mid,"filename":name,"format":ext[1:].upper(),"size_bytes":len(raw)}
 
 @router.get("/api/models/{model_id}/download")
@@ -148,6 +163,6 @@ def download_model(model_id: str, u=Depends(current_user)):
     path = Path(row["storage_path"]).resolve()
     if MODELS not in path.parents or not path.is_file():
         raise HTTPException(404, "Файл модели отсутствует")
-    return FileResponse(path, filename=row["original_filename"])
+    return FileResponse(path, filename=row["original_filename"], media_type="application/octet-stream")
 
 app.include_router(router)

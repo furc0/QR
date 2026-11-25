@@ -97,3 +97,39 @@ def test_categories_share_links_and_3d_model_upload():
     assert deleted.status_code == 200
     assert deleted.json()["parts_preserved"] is True
     assert client.get("/api/parts/" + part_id, headers=auth()).json()["part"]["category_id"] is None
+
+
+def test_category_names_are_unique_case_insensitively_and_rename_conflicts():
+    first = client.post("/api/categories", headers=auth(), json={"name": "Корпус"})
+    assert first.status_code == 200
+    duplicate = client.post("/api/categories", headers=auth(), json={"name": " корпус "})
+    assert duplicate.status_code == 409
+    second = client.post("/api/categories", headers=auth(), json={"name": "Втулки"})
+    assert second.status_code == 200
+    conflict = client.patch("/api/categories/" + second.json()["id"], headers=auth(),
+                            json={"name": "КОРПУС"})
+    assert conflict.status_code == 409
+
+def test_model_upload_rejects_unsupported_and_empty_files():
+    part_id = create_part("MODEL-VALIDATION", "Model validation")
+    unsupported = client.post("/api/parts/" + part_id + "/models", headers=auth(),
+                              files={"file": ("model.exe", b"nope", "application/octet-stream")})
+    assert unsupported.status_code == 415
+    empty = client.post("/api/parts/" + part_id + "/models", headers=auth(),
+                        files={"file": ("empty.stl", b"", "model/stl")})
+    assert empty.status_code == 400
+
+def test_part_creation_assigns_category_atomically():
+    category = client.post("/api/categories", headers=auth(), json={"name": "Кронштейны"})
+    assert category.status_code == 200
+    created = client.post("/api/parts", headers=auth(), json={
+        "part_code": "ATOMIC-CAT-01", "title": "Support", "kind": "part",
+        "category_id": category.json()["id"]
+    })
+    assert created.status_code == 200, created.text
+    detail = client.get("/api/parts/" + created.json()["id"], headers=auth()).json()["part"]
+    assert detail["category_id"] == category.json()["id"]
+    invalid = client.post("/api/parts", headers=auth(), json={
+        "part_code": "ATOMIC-CAT-02", "title": "Wrong category", "category_id": "not-in-this-org"
+    })
+    assert invalid.status_code == 404
