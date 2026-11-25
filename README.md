@@ -23,7 +23,9 @@ The installer stores its private runtime under `%LOCALAPPDATA%\QR-Album`. Existi
 
 Updates remove an earlier installer-managed release only after the replacement has opened the catalogue and only if the previous file inventory still matches. Original source folders and system Python installations are preserved.
 
-To rebuild the distributable after changing runtime code, run `python installer/build.py QR_Setup.cmd`.
+Each launch of QR_Setup.cmd or the desktop shortcut checks the release manifest on GitHub main. On a newer release QR downloads the exact installer blob and verifies SHA-256 before installing. Updates are applied at startup. Without GitHub access the existing runtime starts normally. First installation still needs internet for missing dependencies. On successful update the installed setup and the currently launched external installer are refreshed if writable.
+
+To publish an update, increment the integer in `installer/version.txt`, run `python installer/build.py QR_Setup.cmd`, and commit the generated `QR_Setup.cmd` and `installer/release.json` together with the sources to main. Release numbers apply to changes in the installer itself as well as in the application.
 
 ## Run from a source checkout on Windows
 
