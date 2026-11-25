@@ -1,402 +1,122 @@
-# QR — Модель данных
-Версия: 0.1  
-Статус: логическая модель для review перед созданием миграций  
-Связанные документы: TECHNICAL_SPECIFICATION.md, ARCHITECTURE.md
-
-## 1. Принципы модели
-
-1. Каждая инженерная сущность имеет неизменяемый UUID.
-2. Все данные организации изолируются через organization_id.
-3. Лицензии и глобальные политики принадлежат центральному контуру и не редактируются администраторами организаций.
-4. Инженерные ревизии и версии документов неизменяемы после публикации; исправление создаёт новую версию.
-5. Удаление синхронизируемых сущностей использует tombstone, а не физическое удаление сразу.
-6. Временные метки хранятся в UTC.
-7. Схема должна быть реализуема на PostgreSQL и иметь совместимую проекцию на SQLite.
-8. Секреты, пароли, открытые ключи подписи и содержимое файлов не хранятся в обычных полях карточек.
-
-## 2. Идентификаторы и соглашения
-
-- Primary key: UUID.
-- Внешние ключи: UUID с явными ограничениями.
-- Код детали: отдельное поле part_code; не используется как PK.
-- Денежные/измерительные величины не хранятся в float без единиц и точности.
-- Размеры хранятся с указанием единиц измерения и валидируемой точности.
-- JSON-поля разрешены для расширяемых инженерных атрибутов и snapshot, но критичные связи и права остаются нормализованными.
-
-## 3. Основные сущности
-
-### 3.1 Identity и организация
-
-**users**
-- id
-- login/email (уникальность и нормализация уточняются)
-- password_hash или внешний identity subject
-- status
-- mfa_state
-- created_at, updated_at, last_login_at
-
-**organizations**
-- id
-- name
-- slug
-- status
-- created_at, updated_at
-
-**memberships**
-- id
-- organization_id
-- user_id
-- status
-- created_at
-- UNIQUE(organization_id, user_id)
-
-**roles**
-- id
-- organization_id nullable для системных шаблонов
-- key
-- name
-- is_system
-- UNIQUE(organization_id, key)
-
-**permissions**
-- id
-- key
-- description
-- UNIQUE(key)
-
-**role_permissions**
-- role_id
-- permission_id
-- PRIMARY KEY(role_id, permission_id)
-
-**membership_roles**
-- membership_id
-- role_id
-- PRIMARY KEY(membership_id, role_id)
-
-Platform Owner не назначается через обычную membership role. Его полномочия задаются отдельной защищённой системной идентичностью/allowlist и MFA.
-
-### 3.2 Каталог
-
-**parts**
-- id
-- organization_id
-- part_code
-- title
-- description
-- status: draft | active | archived
-- current_revision_id nullable
-- created_by
-- created_at, updated_at
-- deleted_at nullable (tombstone)
-
-Ограничения:
-- UNIQUE(organization_id, part_code).
-- FK на organization и пользователя.
-- Все операции по parts фильтруются по organization_id из доверенного контекста.
-
-**part_revisions**
-- id
-- organization_id
-- part_id
-- revision_number
-- snapshot_json
-- change_summary
-- created_by
-- created_at
-- UNIQUE(part_id, revision_number)
-
-Ревизия — immutable snapshot. Изменение карточки создаёт новую ревизию и меняет current_revision_id в одной транзакции.
-
-**categories**
-- id
-- organization_id
-- parent_id nullable
-- name
-- code nullable
-- sort_order
-- status
-
-**part_categories**
-- part_id
-- category_id
-- PRIMARY KEY(part_id, category_id)
-
-**tags**
-- id
-- organization_id
-- name
-- normalized_name
-
-**part_tags**
-- part_id
-- tag_id
-- PRIMARY KEY(part_id, tag_id)
-
-**part_relations**
-- id
-- organization_id
-- source_part_id
-- target_part_id
-- relation_type (например, assembly_component, replacement, related)
-- quantity nullable
-- unit nullable
-
-Ограничить циклические/некорректные отношения правилами доменного слоя; для сборок предусмотреть проверку циклов.
-
-### 3.3 Документы и файлы
-
-**documents**
-- id
-- organization_id
-- original_filename
-- detected_mime_type
-- extension
-- size_bytes
-- checksum_sha256
-- storage_key
-- scan_status
-- created_by
-- created_at
-- deleted_at nullable
-
-**document_versions**
-- id
-- organization_id
-- document_id
-- version_number
-- checksum_sha256
-- storage_key
-- size_bytes
-- created_by
-- created_at
-- UNIQUE(document_id, version_number)
-
-**part_documents**
-- part_id
-- document_version_id
-- document_role (drawing, model_3d, image, specification, other)
-- display_order
-- PRIMARY KEY(part_id, document_version_id, document_role)
-
-Файловое содержимое хранится в приватном object storage или локальном зашифрованном хранилище. В БД хранятся метаданные и ключ хранения, но не публичный постоянный URL.
-
-### 3.4 QR-маршруты
-
-**qr_routes**
-- id
-- organization_id
-- part_id
-- route_token_hash
-- status
-- created_by
-- created_at
-- revoked_at nullable
-
-В QR не помещается постоянный секрет авторизации. Если маршрут содержит случайный идентификатор, сервер всё равно требует входа и проверки доступа. Хранить hash токена, если токен используется как bearer-like locator. Не использовать последовательный ID как единственную защиту.
-
-### 3.5 Лицензии и функции
-
-**licenses**
-- id
-- organization_id
-- status
-- valid_from
-- valid_until
-- license_reference
-- created_at
-- updated_at
-
-**license_entitlements**
-- id
-- license_id
-- feature_key
-- enabled
-- limits_json nullable
-- UNIQUE(license_id, feature_key)
-
-**owner_feature_policies**
-- id
-- feature_key
-- enabled
-- policy_json
-- policy_version
-- updated_by_owner
-- updated_at
-
-Глобальная политика хранится в центральном контуре. Клиент и Organization Admin не имеют API-пути на изменение этой таблицы.
-
-**license_leases**
-- id
-- license_id
-- organization_id
-- installation_id nullable
-- issued_at
-- not_before
-- expires_at
-- offline_until
-- payload_version
-- signing_key_id
-- signed_payload
-- signature
-- status
-- revoked_at nullable
-
-Подписанный payload должен быть воспроизводимо канонизирован. Закрытый ключ подписи не хранится в этой таблице и не передаётся клиенту.
-
-**device_installations**
-- id
-- organization_id
-- user_id nullable
-- public_key nullable
-- device_label
-- platform
-- status
-- first_seen_at
-- last_seen_at
-- revoked_at nullable
-
-### 3.6 Синхронизация
-
-**sync_operations**
-- operation_id (UUID, уникальный)
-- organization_id
-- installation_id
-- entity_type
-- entity_id
-- base_revision nullable
-- operation_type
-- payload
-- status
-- received_at
-- processed_at nullable
-- result_json nullable
-
-Уникальность operation_id предотвращает повторное применение одной операции.
-
-**sync_cursors**
-- id
-- organization_id
-- installation_id
-- cursor_value
-- updated_at
-- UNIQUE(organization_id, installation_id)
-
-**sync_conflicts**
-- id
-- organization_id
-- installation_id
-- entity_type
-- entity_id
-- base_revision
-- server_revision
-- client_payload
-- status
-- resolution
-- created_at
-- resolved_at nullable
-
-### 3.7 Аудит
-
-**audit_events**
-- id
-- organization_id nullable для глобальных событий
-- actor_user_id nullable для системных действий
-- actor_type
-- action
-- target_type
-- target_id nullable
-- outcome
-- correlation_id
-- metadata_json
-- created_at
-
-Audit events append-only на уровне приложения и ограничений БД. Обычные администраторы не имеют права UPDATE/DELETE. Для повышенной защиты возможна периодическая подпись/хеш-цепочка событий и экспорт в отдельное хранилище.
-
-## 4. Отношения сущностей
-
-- Organization 1—N Membership.
-- User 1—N Membership.
-- Organization 1—N Part.
-- Part 1—N PartRevision.
-- Part N—N Category через PartCategory.
-- Part N—N Tag через PartTag.
-- Part N—N DocumentVersion через PartDocument.
-- Organization 1—N License.
-- License 1—N Entitlement.
-- License 1—N LicenseLease.
-- Organization 1—N DeviceInstallation.
-- DeviceInstallation 1—N SyncOperation и SyncCursor.
-- Organization 1—N AuditEvent (глобальные события владельца могут иметь organization_id NULL).
-
-## 5. Tenant isolation и ограничения
-
-1. Каждый tenant-owned запрос получает organization_id из серверной сессии/membership context.
-2. Запрещено принимать organization_id из тела запроса как источник полномочий.
-3. Все репозитории данных требуют tenant context параметром.
-4. Для критичных таблиц использовать составные уникальные ключи/FK с organization_id там, где это помогает предотвратить cross-tenant ссылки.
-5. Рассмотреть PostgreSQL Row-Level Security как дополнительный барьер, но не заменять им проверки в сервисах.
-6. Для SQLite offline данные привязаны к локальному профилю организации и зашифрованы; при синхронизации сервер повторно проверяет tenant membership и разрешения.
-7. Набор интеграционных тестов обязан пытаться подменить part_id, document_id, route_id и organization_id.
-
-## 6. Разрешения и матрица функций
-
-Базовые permission keys:
-
-| Permission | Platform Owner | Org Admin | Designer | Engineer | Viewer |
-|---|---:|---:|---:|---:|---:|
-| catalog.read | Да | Да | Да | Да | Да |
-| catalog.create | Да | Да | Да | Нет | Нет |
-| catalog.update | Да | Да | Да | По назначению | Нет |
-| catalog.archive | Да | Да | По назначению | Нет | Нет |
-| documents.read | Да | Да | Да | Да | Да |
-| documents.upload | Да | Да | Да | По назначению | Нет |
-| documents.export | Да | Да | По назначению | По назначению | Нет |
-| viewer3d.view | Да | Да | Да | Да | По лицензии |
-| users.manage | Да | Да | Нет | Нет | Нет |
-| organization.settings | Да | Да | Нет | Нет | Нет |
-| global.license.manage | Да | Нет | Нет | Нет | Нет |
-| global.feature_policy.manage | Да | Нет | Нет | Нет | Нет |
-
-Таблица задаёт шаблон, а не безусловную выдачу. Глобальная политика и entitlement лицензии могут запретить функцию. Org Admin не получает глобальные права Platform Owner.
-
-## 7. Индексы и производительность
-
-Начальные индексы:
-- parts(organization_id, part_code) UNIQUE;
-- parts(organization_id, status, updated_at);
-- part_revisions(part_id, revision_number) UNIQUE;
-- documents(organization_id, checksum_sha256);
-- qr_routes(organization_id, route_token_hash) UNIQUE;
-- memberships(user_id, organization_id);
-- sync_operations(installation_id, status, received_at);
-- audit_events(organization_id, created_at);
-- license_leases(license_id, offline_until, status).
-
-Индексы уточняются по реальным запросам и EXPLAIN ANALYZE. Не добавлять индексы на все поля без измерений.
-
-## 8. Локальная SQLite-проекция
-
-SQLite хранит только данные, необходимые текущей установке и разрешённые для локального кэширования:
-- выбранные организации и локальный контекст пользователя;
-- карточки и ревизии, доступные установке;
-- метаданные документов и зашифрованные файлы;
-- outbox/inbox;
-- sync cursor;
-- подписанный lease и его состояние;
-- локальные настройки темы.
-
-Локальная схема должна иметь migration version. Миграции выполняются транзакционно, с резервной копией перед потенциально разрушительными изменениями. Нельзя полагаться на то, что SQLite и PostgreSQL полностью одинаковы по типам и поведению; различия изолируются в repository/adapters.
-
-## 9. Решения, которые нужно утвердить перед миграциями
-
-1. Уникальность part_code: внутри организации или глобально.
-2. Нужны ли несколько организаций одному пользователю в первой версии.
-3. Какие поля карточки обязательны и какие пользователь может настраивать.
-4. Нужны ли сборки и спецификации в MVP или только отдельные детали.
-5. Требуется ли хранить оригинальные файлы без ограничения срока.
-6. Допустимые размеры файлов и модели.
-7. Политика хранения audit events и срок хранения удалённых данных.
-8. Как устроить восстановление локального ключа при смене Windows-профиля/ПК.
-
-После утверждения этих решений модель превращается в Prisma schema/SQL migrations и SQLite migrations. До этого не создавать необратимые production-миграции.
+# QR — Финальная логическая и физическая модель данных
+Версия: 1.0
+Статус: утверждена для реализации; физическая схема PostgreSQL описана в migrations/postgresql
+Дата утверждения ключевых решений: 2026-11-25
+
+## 1. Зафиксированные продуктовые решения
+
+1. `part_code` уникален в пределах организации: `UNIQUE (organization_id, part_code)`. Между организациями одинаковые коды допустимы.
+2. Пользователь может состоять в нескольких организациях. Роли назначаются членству, а не глобально пользователю.
+3. Сборки и спецификации входят в базовую модель. Сборка — специальный вид детали; её состав хранится как BOM (bill of materials) с количеством, единицей измерения, позицией и ссылкой на конкретную ревизию компонента при необходимости.
+4. История файлов и версий не ограничивается прикладным лимитом. Версии не перезаписываются. Физическое удаление допускается только по отдельной административной процедуре/политике хранения, а не как обычное редактирование.
+5. Windows desktop — первая платформа; сервер PostgreSQL на VPS; локальная БД SQLite/SQLCipher; локальные файлы шифруются аутентифицированным шифрованием.
+6. UUID — внутренний неизменяемый идентификатор. Код детали — отдельный человекочитаемый атрибут.
+
+## 2. Общие правила
+
+- Время — UTC, тип PostgreSQL `timestamptz`; SQLite хранит ISO-8601 UTC.
+- UUID генерируется приложением (UUIDv7 предпочтителен для новых записей; UUIDv4 допустим).
+- Все сущности организации имеют `organization_id`.
+- Для tenant-owned связей используются составные FK, включающие `organization_id`, чтобы БД не позволяла связать сущности разных организаций.
+- Опубликованные ревизии детали и версии документа неизменяемы.
+- Удаления синхронизируемых объектов сначала создают tombstone (`deleted_at`), физическое удаление не используется в обычном API.
+- JSONB используется для расширяемых атрибутов/snapshot, но не вместо нормализованных отношений, прав или BOM.
+- Файлы хранятся в приватном object storage или зашифрованном локальном vault. БД содержит только метаданные и непрозрачный storage key.
+- `organization_id` никогда не принимается как источник полномочий из клиентского payload: tenant определяется сервером из проверенного членства.
+
+## 3. Identity, tenants и access control
+
+### users
+`id, email_normalized, display_name, password_hash nullable, auth_provider, auth_subject, status, mfa_enabled, created_at, updated_at, last_login_at`.
+Уникальность email — по нормализованному адресу. Для внешней аутентификации уникальна пара (auth_provider, auth_subject).
+
+### organizations
+`id, name, slug, status, created_at, updated_at`. Slug глобально уникален.
+
+### memberships
+`id, organization_id, user_id, status, joined_at, created_at, updated_at`.
+Уникально `(organization_id,user_id)`. У пользователя может быть много membership.
+
+### permissions / roles / role_permissions / membership_roles
+Permissions — системный каталог ключей. Роли принадлежат конкретной организации. Одно членство может иметь несколько ролей. Уникальность роли — `(organization_id,key)`. Составной FK membership_roles гарантирует, что роль и членство относятся к одной организации.
+Platform Owner не является обычной ролью организации; его доступ — отдельная системная идентичность и MFA.
+
+## 4. Инженерный каталог
+
+### parts
+`id, organization_id, part_code, title, description, kind, status, attributes_json, current_revision_id, created_by, updated_by, created_at, updated_at, deleted_at`.
+- `kind`: `part | assembly`.
+- `status`: `draft | active | archived`.
+- `UNIQUE(organization_id, part_code)`, без глобальной уникальности.
+- `attributes_json` — только расширяемые параметры; основные поисковые поля остаются отдельными колонками.
+- UUID детали постоянен; смена кода не меняет UUID и QR locator.
+
+### part_revisions
+Неизменяемые snapshots: `id, organization_id, part_id, revision_number, snapshot_json, change_summary, created_by, created_at`. Уникально `(part_id,revision_number)`. Смена текущей ревизии выполняется одной транзакцией вместе с созданием ревизии.
+
+### categories / part_categories / tags / part_tags
+Дерево категорий внутри организации; теги нормализованы в рамках организации. Composite FK не допускают межорганизационные связи.
+
+### assemblies и BOM
+Отдельная таблица assemblies не нужна: сборка — `parts.kind='assembly'`. Таблица `bom_items` содержит:
+- `id, organization_id, assembly_part_id, component_part_id`;
+- `component_revision_id nullable` — если состав фиксирует конкретную ревизию;
+- `quantity numeric(20,6) > 0`, `unit_code`, `position_no`, `find_number`, `notes`;
+- `created_at, updated_at, deleted_at`.
+Одна сборка может иметь много строк состава. Компонентом может быть деталь или вложенная сборка. Составные FK обеспечивают один tenant. Циклы BOM (сборка включает саму себя напрямую/через вложенные сборки) проверяются доменным сервисом транзакционно; перед публикацией спецификации обязателен graph-cycle check. Порядок строк задаётся `position_no`, не порядком вставки.
+
+### part_relations
+Для дополнительных отношений, не являющихся BOM: замена, аналог, сопряжённая деталь и т.п. BOM не дублируется в этой таблице.
+
+## 5. Документы и файлы
+
+### documents
+Логический файл: `id, organization_id, original_filename, detected_mime_type, extension, created_by, created_at, deleted_at`.
+
+### document_versions
+Неизменяемые версии бинарного содержимого: `id, organization_id, document_id, version_number, storage_key, checksum_sha256, size_bytes, encryption_metadata, scan_status, created_by, created_at`. Уникально `(document_id,version_number)`. Каждая новая загрузка создаёт новую версию; старые версии сохраняются. Нет прикладного ограничения числа версий.
+
+### part_documents
+Связывает деталь/сборку с версией документа и ролью (`drawing, model_3d, image, specification, passport, other`). Спецификация может быть как отдельным файлом, так и структурированным BOM; эти варианты не исключают друг друга.
+
+## 6. QR
+
+`qr_routes` хранит `id, organization_id, part_id, route_token_hash, status, created_by, created_at, revoked_at`. В QR помещается непрозрачный случайный locator, но не право доступа. Сервер проверяет аутентификацию, членство и разрешение на объект. Хранится только hash locator-токена. Для перевыпуска создаётся/активируется новый маршрут, старый отзывается.
+
+## 7. Лицензирование и устройства
+
+`licenses, license_entitlements, owner_feature_policies, device_installations, license_leases`.
+Lease — подписанный сервером payload с версией схемы, tenant/license/installation, issued/not-before/expires/offline-until, features, policy version и key id. Приватный ключ подписи не хранится в БД клиента и не передаётся ему. После offline_until клиент блокирует рабочее пространство, но сохраняет зашифрованные данные и outbox. Сервер перепроверяет права при каждом API-вызове.
+
+## 8. Синхронизация
+
+- `sync_operations`: idempotent operation_id, tenant, installation, entity type/id, base revision, operation type, JSON payload, state, timestamps, result.
+- `sync_cursors`: последний применённый серверный cursor для установки/организации.
+- `sync_conflicts`: base/server revision, клиентский payload, статус и разрешение.
+- Клиент атомарно записывает доменное изменение и outbox в одной локальной транзакции.
+- Сервер дедуплицирует по operation_id. Pull cursor подтверждается только после применения пакета локально.
+- Ошибки/конфликты не приводят к молчаливому затиранию данных.
+
+## 9. Audit
+
+Append-oriented `audit_events`: actor, tenant, action, target, outcome, correlation id, metadata, timestamp. Обычные роли не получают UPDATE/DELETE. Для защиты от администратора БД нужен внешний append-only export/подпись или WORM storage — один SQL constraint не обеспечивает абсолютную неизменяемость.
+
+## 10. Tenant isolation и PostgreSQL RLS
+
+Все tenant таблицы используют `organization_id`. В запросной транзакции API выставляет `app.current_organization_id` из проверенного контекста. RLS включается как дополнительная защита. Роль приложения не должна быть superuser, owner таблиц или иметь BYPASSRLS. Для миграций используется отдельная роль. Составные FK остаются обязательными даже при RLS.
+
+## 11. Локальная SQLite-проекция
+
+SQLite — локальный cache + offline write model, а не authority для лицензии/прав на сервере. Файл БД шифруется SQLCipher. Документы шифруются AES-256-GCM (или утверждённым AEAD) с уникальными nonce; ключи защищаются DPAPI. Локальная схема повторяет необходимые доменные поля, но может включать только выбранные организации/данные. Все локальные таблицы имеют `organization_id`; outbox/inbox/cursors — отдельные таблицы. Перед миграцией создаётся проверенная резервная копия; migration version хранится в `PRAGMA user_version` или таблице schema_migrations.
+
+## 12. Индексы
+
+Обязательные индексы включены в PostgreSQL migration: уникальность email/slug, membership, tenant part_code, каталог по статусу/обновлению, revisions, BOM по assembly/component, document checksum, QR hash, sync queue, cursor, audit chronology. Дополнительные индексы добавляются после EXPLAIN ANALYZE.
+
+## 13. Политика хранения
+
+История ревизий деталей и файлов не ограничивается числом версий. Удаление из интерфейса — tombstone. Удаление бинарных объектов и персональных данных — отдельная операция с проверкой legal/backup/retention obligations, аудитом и подтверждением. Unlimited означает отсутствие искусственного лимита версий, но не бесконечную ёмкость VPS: мониторинг диска, резервирование и план расширения обязательны.
+
+## 14. Статус реализации
+
+Эта модель и SQL migrations задают контракт для реализации. Они не означают, что сервер, клиент, шифрование, RLS или синхронизация уже реализованы/проверены в работающем приложении. До production нужны integration tests, tenant-isolation tests, security review, migration rehearsal и restore test.
