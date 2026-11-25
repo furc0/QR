@@ -1,5 +1,6 @@
 from __future__ import annotations
 import hashlib, hmac, json, os, secrets, sqlite3, time, uuid, base64
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, Depends, Header, HTTPException, File, UploadFile
@@ -17,9 +18,18 @@ origins=[x.strip() for x in os.getenv("QR_CORS_ORIGINS","").split(",") if x.stri
 if origins:
     app.add_middleware(CORSMiddleware,allow_origins=origins,allow_credentials=False,allow_methods=["*"],allow_headers=["Authorization","Content-Type"])
 
+@contextmanager
 def connect():
     c=sqlite3.connect(DB,timeout=20); c.row_factory=sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON"); c.execute("PRAGMA journal_mode=WAL"); return c
+    c.execute("PRAGMA foreign_keys=ON"); c.execute("PRAGMA journal_mode=WAL")
+    try:
+        yield c
+        c.commit()
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
 
 def init():
     with connect() as c:
