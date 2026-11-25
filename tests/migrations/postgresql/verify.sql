@@ -67,8 +67,13 @@ BEGIN
   END;
 END $$;
 
+-- Create one valid nested edge, then verify that the reverse edge is rejected.
+INSERT INTO bom_items(id,organization_id,assembly_part_id,component_part_id,quantity,unit_code)
+VALUES ('50000000-0000-0000-0000-000000000005','10000000-0000-0000-0000-000000000001',
+        '30000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002',1,'pcs');
+
 -- A nested assembly cycle must fail.
-DO $$
+DO $
 BEGIN
   BEGIN
     INSERT INTO bom_items(id,organization_id,assembly_part_id,component_part_id,quantity,unit_code)
@@ -78,6 +83,22 @@ BEGIN
   EXCEPTION WHEN check_violation THEN NULL;
   END;
 END $$;
+
+-- Revision and document history rows cannot be rewritten in place.
+INSERT INTO documents(id,organization_id,original_filename,created_by)
+VALUES ('60000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','drawing.pdf','00000000-0000-0000-0000-000000000001');
+INSERT INTO document_versions(id,organization_id,document_id,version_number,storage_key,checksum_sha256,size_bytes,created_by)
+VALUES ('70000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001',
+        '60000000-0000-0000-0000-000000000001',1,'opaque/test','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,
+        '00000000-0000-0000-0000-000000000001');
+DO $
+BEGIN
+  BEGIN
+    UPDATE document_versions SET size_bytes = 2 WHERE id = '70000000-0000-0000-0000-000000000001';
+    RAISE EXCEPTION 'expected immutable document version violation';
+  EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+  END;
+END $;
 
 -- Runtime role can discover only its own memberships before choosing a tenant.
 SET ROLE qr_runtime;
